@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}Test Mode – MindMath{% endblock %}
+{% block body %}
+<div class="screen test-screen">
+
+  <!-- Top bar: global timer + score + progress -->
+  <div class="top-bar test-top-bar">
+    <div class="test-progress">
+      <span id="q-counter">Q 1 / {{ total_questions }}</span>
+    </div>
+    <div id="global-timer" class="timer test-timer">8:00</div>
+    <div class="score-display">
+      <span id="score-val">0</span>
+      <span class="score-label"> pts</span>
+    </div>
+  </div>
+
+  <!-- Progress bar (question index) -->
+  <div class="progress-bar-wrap">
+    <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+  </div>
+
+  <!-- Question card -->
+  <div class="question-card" id="question-card">
+    <div class="question-category" id="q-category"></div>
+    <div class="question-text" id="q-text"></div>
+  </div>
+
+  <!-- Multiple choice options -->
+  <div class="options-grid" id="options-grid"></div>
+
+  <!-- Skip button -->
+  <button class="btn-skip" id="skip-btn" onclick="chooseAnswer(null)">Skip</button>
+
+  <!-- Flag button -->
+  <button class="flag-btn" id="flag-btn" onclick="openFlag()">🚩</button>
+
+</div>
+
+<!-- Flag modal -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
+<div class="modal" id="flag-modal" style="display:none">
+  <h3>Flag this question</h3>
+  <div class="modal-question" id="modal-q-text"></div>
+  <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
+  <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
+  <div class="modal-btns">
+    <button class="btn-secondary" onclick="closeFlag()">Cancel</button>
+    <button class="btn-primary" onclick="submitFlag()">Submit Flag</button>
+  </div>
+</div>
+
+<script>
+const QUESTIONS = {{ questions_json | safe }};
+const TOTAL = {{ total_questions }};
+const TEST_DURATION = {{ test_duration }};
+const SERVER_START = {{ start_time }};
+const DIFFICULTY = "{{ difficulty }}";
+
+let currentIndex = 0;
+let score = 0;
+let chosenAnswers = new Array(TOTAL).fill(null);  // null = skipped
+let timerInterval = null;
+let testEnded = false;
+
+function getElapsed() {
+  return (Date.now() / 1000) - SERVER_START;
+}
+
+function getRemaining() {
+  return Math.max(0, TEST_DURATION - getElapsed());
+}
+
+function formatTime(secs) {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function updateTimer() {
+  const rem = getRemaining();
+  const el = document.getElementById('global-timer');
+  el.textContent = formatTime(rem);
+  if (rem <= 60) {
+    el.classList.add('urgent');
+  } else {
+    el.classList.remove('urgent');
+  }
+  if (rem <= 0 && !testEnded) {
+    endTest();
+  }
+}
+
+function renderQuestion(idx) {
+  if (idx >= TOTAL) { endTest(); return; }
+  const q = QUESTIONS[idx];
+
+  document.getElementById('q-counter').textContent = 'Q ' + (idx + 1) + ' / ' + TOTAL;
+  document.getElementById('q-category').textContent =
+    (q.category || '').charAt(0).toUpperCase() + (q.category || '').slice(1);
+  document.getElementById('q-text').textContent = q.text;
+  document.getElementById('score-val').textContent = score;
+
+  // Progress bar
+  const pct = (idx / TOTAL * 100).toFixed(1);
+  document.getElementById('progress-bar').style.width = pct + '%';
+
+  // Options
+  const grid = document.getElementById('options-grid');
+  grid.innerHTML = '';
+  (q.options || []).forEach(function(opt, i) {
+    const btn = document.createElement('button');
+    btn.className = 'option-btn';
+    btn.textContent = opt;
+    btn.onclick = function() { chooseAnswer(i); };
+    grid.appendChild(btn);
+  });
+}
+
+function chooseAnswer(optionIndex) {
+  if (testEnded) return;
+
+  const q = QUESTIONS[currentIndex];
+  chosenAnswers[currentIndex] = optionIndex;  // null = skip
+
+  if (optionIndex !== null) {
+    if (optionIndex === q.correct_index) {
+      score += 1;
+    } else {
+      score -= 1;
+    }
+    document.getElementById('score-val').textContent = score;
+  }
+
+  currentIndex++;
+  if (currentIndex >= TOTAL) {
+    endTest();
+  } else {
+    renderQuestion(currentIndex);
+  }
+}
+
+function endTest() {
+  if (testEnded) return;
+  testEnded = true;
+  clearInterval(timerInterval);
+
+  // Disable UI
+  document.getElementById('options-grid').innerHTML = '<p class="ending-msg">Submitting…</p>';
+  document.getElementById('skip-btn').disabled = true;
+
+  fetch('/end-test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      answers: chosenAnswers,
+      elapsed: getElapsed()
+    })
+  })
+  .then(r => r.json())
+  .then(data => { window.location.href = data.redirect; })
+  .catch(() => { window.location.href = '/'; });
+}
+
+// Flag modal
+function openFlag() {
+  if (currentIndex >= TOTAL) return;
+  const q = QUESTIONS[currentIndex];
+  document.getElementById('modal-q-text').textContent = q.text || '';
+  document.getElementById('modal-q-answer').textContent =
+    (q.options && q.correct_index !== undefined) ? q.options[q.correct_index] : '';
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
+function closeFlag() {
+  document.getElementById('modal-backdrop').style.display = 'none';
+  document.getElementById('flag-modal').style.display = 'none';
+}
+
+function submitFlag() {
+  if (currentIndex >= TOTAL) { closeFlag(); return; }
+  const q = QUESTIONS[currentIndex];
+  const comment = document.getElementById('flag-comment').value;
+  fetch('/flag', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      game_mode: 'test',
+      difficulty: DIFFICULTY,
+      question_text: q.text,
+      correct_answer: q.options ? q.options[q.correct_index] : '',
+      category: q.category,
+      user_comment: comment
+    })
+  }).then(() => closeFlag());
+}
+
+// Boot
+timerInterval = setInterval(updateTimer, 250);
+updateTimer();
+renderQuestion(0);
+</script>
+{% endblock %}

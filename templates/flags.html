@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Flagged Questions – MindMath{% endblock %}
+{% block body %}
+<div class="screen flags-screen">
+  <header class="flags-header">
+    <a href="/" class="back-link">← Home</a>
+    <h1>Flagged Questions</h1>
+    <p class="flags-note">
+      Share this page or <code>flagged_questions.json</code> with Claude Code
+      to fix question generation issues.
+    </p>
+  </header>
+
+  {% if flags %}
+    <p class="flag-count">{{ flags | length }} flag{{ 's' if flags | length != 1 }}</p>
+    {% for f in flags %}
+    <div class="flag-card">
+      <div class="flag-meta">
+        <span class="badge mode-{{ f.game_mode }}">{{ f.game_mode | capitalize }}</span>
+        <span class="badge diff-{{ f.difficulty }}">{{ f.difficulty | capitalize }}</span>
+        <span class="badge cat">{{ f.category | capitalize }}</span>
+        <span class="flag-ts">{{ f.timestamp }}</span>
+      </div>
+      <div class="flag-question">{{ f.question_text }}</div>
+      <div class="flag-answer">Answer: <strong>{{ f.correct_answer }}</strong></div>
+      {% if f.user_comment %}
+      <div class="flag-comment-display">💬 {{ f.user_comment }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">No flagged questions yet.</div>
+  {% endif %}
+</div>
+{% endblock %}

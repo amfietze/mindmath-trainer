@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Results – MindMath{% endblock %}
+{% block body %}
+<div class="screen results-screen">
+
+  <header class="results-header">
+    {% if results.mode == 'test' %}
+      {% if results.passed %}
+        <div class="result-badge pass">PASS</div>
+      {% else %}
+        <div class="result-badge fail">FAIL</div>
+      {% endif %}
+      <div class="big-score">
+        <span class="score-num">{{ results.score }}</span>
+        <span class="score-denom">/ {{ results.max_score }}</span>
+      </div>
+      <p class="score-note">Pass threshold: {{ results.pass_threshold }} points</p>
+    {% else %}
+      <div class="result-badge practice-badge">Session Complete</div>
+      <div class="big-score">
+        <span class="score-num">{{ results.total }}</span>
+        <span class="score-denom"> questions</span>
+      </div>
+    {% endif %}
+  </header>
+
+  <!-- Summary stats -->
+  <section class="card stats-card">
+    <div class="stat-row">
+      <div class="stat-cell correct">
+        <div class="stat-val">{{ results.correct }}</div>
+        <div class="stat-lbl">Correct</div>
+      </div>
+      <div class="stat-cell wrong">
+        <div class="stat-val">{{ results.wrong }}</div>
+        <div class="stat-lbl">Wrong</div>
+      </div>
+      <div class="stat-cell skipped">
+        <div class="stat-val">{{ results.skipped }}</div>
+        <div class="stat-lbl">Skipped</div>
+      </div>
+    </div>
+    {% if results.mode == 'practice' %}
+    <div class="pct-row">
+      <span class="pct correct">{{ results.correct_pct }}% correct</span>
+      <span class="pct wrong">{{ results.wrong_pct }}% wrong</span>
+      <span class="pct skipped">{{ results.skipped_pct }}% skipped</span>
+    </div>
+    {% endif %}
+    <div class="avg-time">Avg time per question: <strong>{{ results.avg_time }}s</strong></div>
+  </section>
+
+  <!-- Category breakdown -->
+  <section class="card">
+    <h2>By Category</h2>
+    <table class="cat-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Qs</th>
+          <th>Correct</th>
+          <th>Accuracy</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in results.categories %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.total }}</td>
+          <td>{{ row.correct }}</td>
+          <td>
+            {% if row.pct is not none %}
+              <div class="acc-bar-wrap">
+                <div class="acc-bar" style="width:{{ row.pct }}%"></div>
+                <span>{{ row.pct }}%</span>
+              </div>
+            {% else %}
+              <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <div class="results-actions">
+    <a href="/" class="btn-primary btn-home">Home</a>
+  </div>
+
+</div>
+{% endblock %}

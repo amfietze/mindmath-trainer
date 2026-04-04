@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}MindMath Trainer{% endblock %}
+{% block body %}
+<div class="screen home-screen">
+  <header class="home-header">
+    <div class="logo">⚡</div>
+    <h1>MindMath</h1>
+    <p class="subtitle">Mental Arithmetic Trainer</p>
+  </header>
+
+  <form method="POST" action="/start" id="startForm">
+    <!-- Mode selection -->
+    <section class="card">
+      <h2>Mode</h2>
+      <div class="btn-group" role="group">
+        <label class="mode-btn" id="label-practice">
+          <input type="radio" name="mode" value="practice" checked>
+          <span>
+            <strong>Open Practice</strong>
+            <small>Continuous · Free text · 10 s/question</small>
+          </span>
+        </label>
+        <label class="mode-btn" id="label-test">
+          <input type="radio" name="mode" value="test">
+          <span>
+            <strong>Test Mode</strong>
+            <small>80 questions · 8 minutes · Multiple choice</small>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Difficulty selection -->
+    <section class="card">
+      <h2>Difficulty</h2>
+      <div class="btn-group" role="group">
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="easy">
+          <span>
+            <strong>Easy</strong>
+            <small>Operands 2–20 · Whole numbers</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="normal" checked>
+          <span>
+            <strong>Normal</strong>
+            <small>Optiver-realistic · Decimals · Fractions</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="hard">
+          <span>
+            <strong>Hard</strong>
+            <small>3–4 digit · Complex decimals · Chains</small>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <button type="submit" class="btn-primary btn-start">Start</button>
+  </form>
+
+  <footer class="home-footer">
+    <a href="/flags" class="link-dim">Review flagged questions →</a>
+  </footer>
+</div>
+
+<script>
+  // Highlight selected radio button groups
+  document.querySelectorAll('input[type="radio"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      var name = this.getAttribute('name');
+      document.querySelectorAll('input[name="' + name + '"]').forEach(function(r) {
+        r.closest('label').classList.remove('selected');
+      });
+      this.closest('label').classList.add('selected');
+    });
+    if (radio.checked) radio.closest('label').classList.add('selected');
+  });
+</script>
+{% endblock %}

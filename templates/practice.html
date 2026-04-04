@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Practice – MindMath{% endblock %}
+{% block body %}
+<div class="screen practice-screen">
+
+  <!-- Top bar -->
+  <div class="top-bar">
+    <div class="stat-mini">
+      <span id="stat-correct">0</span> ✓
+      <span id="stat-wrong" style="margin-left:12px">0</span> ✗
+    </div>
+    <div id="timer-display" class="timer">10</div>
+    <button id="end-btn" class="btn-end" onclick="endSession()">End</button>
+  </div>
+
+  <!-- Progress bar (timer) -->
+  <div class="timer-bar-wrap">
+    <div id="timer-bar" class="timer-bar" style="width:100%"></div>
+  </div>
+
+  <!-- Question card -->
+  <div class="question-card" id="question-card">
+    <div class="question-category" id="q-category">{{ question.category | capitalize }}</div>
+    <div class="question-text" id="q-text">{{ question.text }}</div>
+  </div>
+
+  <!-- Answer form -->
+  <div class="answer-area" id="answer-area">
+    <input
+      type="text"
+      id="answer-input"
+      class="answer-input"
+      inputmode="decimal"
+      autocomplete="off"
+      autocorrect="off"
+      spellcheck="false"
+      placeholder="Your answer"
+      autofocus
+    >
+    <button class="btn-primary btn-submit" id="submit-btn" onclick="submitAnswer()">Submit</button>
+  </div>
+
+  <!-- Feedback overlay (hidden by default) -->
+  <div class="feedback-overlay" id="feedback-overlay" style="display:none">
+    <div class="feedback-icon" id="feedback-icon"></div>
+    <div class="feedback-text" id="feedback-text"></div>
+    <div class="feedback-answer" id="feedback-answer"></div>
+    <div class="feedback-time" id="feedback-time"></div>
+  </div>
+
+  <!-- Flag button -->
+  <button class="flag-btn" id="flag-btn" onclick="openFlag()">🚩</button>
+
+</div>
+
+<!-- Flag modal -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
+<div class="modal" id="flag-modal" style="display:none">
+  <h3>Flag this question</h3>
+  <div class="modal-question" id="modal-q-text"></div>
+  <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
+  <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
+  <div class="modal-btns">
+    <button class="btn-secondary" onclick="closeFlag()">Cancel</button>
+    <button class="btn-primary" onclick="submitFlag()">Submit Flag</button>
+  </div>
+</div>
+
+<script>
+const QUESTION_TIME = {{ question_time }};
+const FEEDBACK_DELAY = {{ feedback_delay }};
+const DIFFICULTY = "{{ difficulty }}";
+const MODE = "practice";
+
+let timerInterval = null;
+let timeLeft = QUESTION_TIME;
+let questionStartTime = Date.now();
+let currentQuestion = {{ question | tojson }};
+let statsCorrect = 0;
+let statsWrong = 0;
+let awaitingNext = false;
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timeLeft = QUESTION_TIME;
+  questionStartTime = Date.now();
+  updateTimerDisplay();
+
+  timerInterval = setInterval(function() {
+    timeLeft = Math.max(0, QUESTION_TIME - (Date.now() - questionStartTime) / 1000);
+    updateTimerDisplay();
+    if (timeLeft <= 0) {
+      clearInterval(timerInterval);
+      autoSkip();
+    }
+  }, 100);
+}
+
+function updateTimerDisplay() {
+  const el = document.getElementById('timer-display');
+  const bar = document.getElementById('timer-bar');
+  const secs = Math.ceil(timeLeft);
+  el.textContent = secs;
+  bar.style.width = (timeLeft / QUESTION_TIME * 100) + '%';
+  if (timeLeft <= 3) {
+    el.classList.add('urgent');
+    bar.classList.add('urgent');
+  } else {
+    el.classList.remove('urgent');
+    bar.classList.remove('urgent');
+  }
+}
+
+function autoSkip() {
+  if (awaitingNext) return;
+  awaitingNext = true;
+  sendAnswer(null, true);
+}
+
+function submitAnswer() {
+  if (awaitingNext) return;
+  const val = document.getElementById('answer-input').value.trim();
+  if (!val) return;
+  clearInterval(timerInterval);
+  awaitingNext = true;
+  const elapsed = (Date.now() - questionStartTime) / 1000;
+  sendAnswer(val, false, elapsed);
+}
+
+function sendAnswer(val, skipped, elapsed) {
+  elapsed = elapsed || (Date.now() - questionStartTime) / 1000;
+  fetch('/submit-answer', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      answer: val || '',
+      time_taken: Math.min(elapsed, QUESTION_TIME),
+      skipped: skipped
+    })
+  })
+  .then(r => r.json())
+  .then(data => showFeedback(data, skipped))
+  .catch(() => loadNext());
+}
+
+function showFeedback(data, skipped) {
+  const overlay = document.getElementById('feedback-overlay');
+  const icon = document.getElementById('feedback-icon');
+  const text = document.getElementById('feedback-text');
+  const ans  = document.getElementById('feedback-answer');
+  const timeEl = document.getElementById('feedback-time');
+
+  if (skipped || data.result === 'skipped') {
+    icon.textContent = '⏭';
+    icon.className = 'feedback-icon skipped';
+    text.textContent = 'Skipped';
+  } else if (data.result === 'correct') {
+    icon.textContent = '✓';
+    icon.className = 'feedback-icon correct';
+    text.textContent = 'Correct!';
+    statsCorrect++;
+    document.getElementById('stat-correct').textContent = statsCorrect;
+  } else {
+    icon.textContent = '✗';
+    icon.className = 'feedback-icon wrong';
+    text.textContent = 'Wrong';
+    statsWrong++;
+    document.getElementById('stat-wrong').textContent = statsWrong;
+  }
+
+  ans.textContent = 'Answer: ' + data.display_answer;
+  timeEl.textContent = skipped ? '' : data.time_taken + 's';
+
+  document.getElementById('answer-area').style.display = 'none';
+  overlay.style.display = 'flex';
+
+  setTimeout(loadNext, FEEDBACK_DELAY);
+}
+
+function loadNext() {
+  fetch('/next-question')
+    .then(r => r.json())
+    .then(q => renderQuestion(q))
+    .catch(() => renderQuestion(null));
+}
+
+function renderQuestion(q) {
+  awaitingNext = false;
+  if (!q) return;
+  currentQuestion = q;
+
+  document.getElementById('q-text').textContent = q.text;
+  document.getElementById('q-category').textContent =
+    (q.category || '').charAt(0).toUpperCase() + (q.category || '').slice(1);
+
+  document.getElementById('feedback-overlay').style.display = 'none';
+  document.getElementById('answer-area').style.display = 'flex';
+
+  const inp = document.getElementById('answer-input');
+  inp.value = '';
+  inp.focus();
+
+  startTimer();
+}
+
+function endSession() {
+  clearInterval(timerInterval);
+  fetch('/end-session', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => { window.location.href = data.redirect; });
+}
+
+// Flag modal
+function openFlag() {
+  document.getElementById('modal-q-text').textContent = currentQuestion.text || '';
+  document.getElementById('modal-q-answer').textContent = currentQuestion.display_answer || '';
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
+function closeFlag() {
+  document.getElementById('modal-backdrop').style.display = 'none';
+  document.getElementById('flag-modal').style.display = 'none';
+}
+
+function submitFlag() {
+  const comment = document.getElementById('flag-comment').value;
+  fetch('/flag', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      game_mode: MODE,
+      difficulty: DIFFICULTY,
+      question_text: currentQuestion.text,
+      correct_answer: currentQuestion.display_answer,
+      category: currentQuestion.category,
+      user_comment: comment
+    })
+  }).then(() => closeFlag());
+}
+
+// Submit on Enter
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitAnswer();
+});
+
+// Boot
+startTimer();
+</script>
+{% endblock %}
