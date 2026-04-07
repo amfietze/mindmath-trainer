@@ -5,6 +5,7 @@
 
   <!-- Top bar: global timer + score + progress -->
   <div class="top-bar test-top-bar">
+    <button class="quit-btn" id="quit-btn" onclick="showQuitConfirm()">&#x2715; Quit</button>
     <div class="test-progress">
       <span id="q-counter">Q 1 / {{ total_questions }}</span>
     </div>
@@ -12,6 +13,15 @@
     <div class="score-display">
       <span id="score-val">0</span>
       <span class="score-label"> pts</span>
+    </div>
+  </div>
+
+  <!-- Quit confirmation (inline) -->
+  <div class="quit-confirm" id="quit-confirm" style="display:none">
+    <p>Are you sure? Your progress will be lost.</p>
+    <div class="quit-confirm-btns">
+      <button class="btn-secondary" onclick="hideQuitConfirm()">Cancel</button>
+      <button class="btn-quit-confirm" onclick="confirmQuit()">Yes, quit</button>
     </div>
   </div>
 
@@ -195,6 +205,19 @@ function submitFlag() {
       user_comment: comment
     })
   }).then(() => closeFlag());
+}
+
+// Quit
+function showQuitConfirm() {
+  document.getElementById('quit-confirm').style.display = 'block';
+  document.getElementById('quit-btn').disabled = true;
+}
+function hideQuitConfirm() {
+  document.getElementById('quit-confirm').style.display = 'none';
+  document.getElementById('quit-btn').disabled = false;
+}
+function confirmQuit() {
+  window.location.href = '/quit';
 }
 
 // Boot

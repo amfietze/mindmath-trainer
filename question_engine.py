@@ -126,6 +126,23 @@ def _gen_integers(difficulty, rng, level_modifier=0):
         ans = rng.randint(2, 15)
         return _q(f'{b * ans} / {b}', ans)
 
+    if difficulty == 'medium':
+        op = rng.choice(['+', '-', '*', 'div'])
+        if op == '+':
+            a, b = rng.randint(10, 60), rng.randint(10, 60)
+            return _q(f'{a} + {b}', a + b)
+        if op == '-':
+            a = rng.randint(21, 99)
+            b = rng.randint(10, a - 1)
+            return _q(f'{a} - {b}', a - b)
+        if op == '*':
+            a = rng.randint(11, 20)
+            b = rng.randint(2, 10)
+            return _q(f'{a} x {b}', a * b)
+        b = rng.randint(2, 12)
+        ans = rng.randint(5, 15)
+        return _q(f'{b * ans} : {b}', ans)
+
     if difficulty == 'normal':
         kind = rng.choice(['mul2', 'add3', 'sub3', 'div2'])
         if kind == 'mul2':
@@ -175,6 +192,25 @@ def _gen_decimals(difficulty, rng, level_modifier=0):
         ans = _rand_dec1(rng, 1, 8)
         return _q(f'{_trunc(ans * b, 1)} / {b}', ans)
 
+    if difficulty == 'medium':
+        kind = rng.choice(['add1', 'sub1', 'div_simple', 'mul1'])
+        if kind == 'add1':
+            a = _rand_dec1(rng, 1, 9)
+            b = _rand_dec1(rng, 1, 9)
+            return _q(f'{a} + {b}', _trunc(a + b, 1))
+        if kind == 'sub1':
+            a = _rand_dec1(rng, 3, 15)
+            b = _rand_dec1(rng, 1, a - 0.1)
+            return _q(f'{a} - {b}', _trunc(a - b, 1))
+        if kind == 'div_simple':
+            b = rng.choice([0.5, 0.25, 2.0, 5.0])
+            ans = rng.randint(2, 20)
+            a = _trunc(ans * b, 1)
+            return _q(f'{_fmt(a)} : {_fmt(b)}', ans)
+        a = _rand_dec1(rng, 1, 9)
+        b = rng.randint(2, 9)
+        return _q(f'{a} x {b}', _trunc(a * b, 1))
+
     if difficulty == 'normal':
         kind = rng.choice(['div_dec', 'mul2', 'add2', 'sub2'])
         if kind == 'div_dec':
@@ -206,6 +242,18 @@ def _gen_fractions(difficulty, rng, level_modifier=0):
         denom = rng.choice([2, 3, 4, 5, 6, 8, 10])
         integer = denom * rng.randint(1, 8)
         return _q(f'(1/{denom}) x {integer}', integer // denom)
+
+    if difficulty == 'medium':
+        kind = rng.choice(['unit_frac', 'frac_mul'])
+        if kind == 'unit_frac':
+            denom = rng.choice([2, 3, 4, 5, 8, 10])
+            integer = denom * rng.randint(1, 6)
+            return _q(f'(1/{denom}) x {integer}', integer // denom)
+        d = rng.choice([2, 3, 4, 5])
+        n = rng.randint(1, d - 1)
+        integer = rng.randint(2, d * 3)
+        result = Fraction(n, d) * integer
+        return _q(f'({n}/{d}) x {integer}', _clean_frac_ans(result), _frac_str(result))
 
     if difficulty == 'normal':
         kind = rng.choice(['to_dec', 'frac_add', 'frac_mul'])
@@ -263,6 +311,24 @@ def _gen_algebra(difficulty, rng, level_modifier=0):
         a, x = rng.randint(2, 10), rng.randint(2, 15)
         return _q(f'x / {a} = {x}', a * x)
 
+    if difficulty == 'medium':
+        kind = rng.choice(['add', 'sub', 'mul', 'div'])
+        if kind == 'add':
+            a = rng.randint(5, 30)
+            x = rng.randint(5, 30)
+            return _q(f'x + {a} = {x + a}', x)
+        if kind == 'sub':
+            a = rng.randint(5, 25)
+            x = rng.randint(10, 40)
+            return _q(f'x - {a} = {x - a}', x)
+        if kind == 'mul':
+            a = rng.randint(2, 15)
+            x = rng.randint(2, 20)
+            return _q(f'{a}x = {a * x}', x)
+        a = rng.randint(2, 12)
+        x = rng.randint(2, 20)
+        return _q(f'x / {a} = {x}', a * x)
+
     if difficulty == 'normal':
         kind = rng.choice(['two_step', 'frac_coeff', 'two_step_sub'])
         if kind == 'two_step':
@@ -302,6 +368,12 @@ def _gen_percentages(difficulty, rng, level_modifier=0):
     if difficulty == 'easy':
         pct = rng.choice([10, 20, 25, 50, 75])
         base = rng.choice([20, 40, 60, 80, 100, 200, 400, 1000])
+        ans = _trunc(pct / 100 * base, 2)
+        return _q(f'{pct}% of {base}', ans)
+
+    if difficulty == 'medium':
+        pct = rng.choice([10, 20, 25, 50, 75])
+        base = rng.randint(10, 99)
         ans = _trunc(pct / 100 * base, 2)
         return _q(f'{pct}% of {base}', ans)
 

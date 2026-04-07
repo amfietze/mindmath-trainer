@@ -26,6 +26,13 @@ TEST_DISTRIBUTION = {
         ('algebra',     0.10),
         ('percentages', 0.10),
     ],
+    'medium': [
+        ('integers',    0.35),
+        ('decimals',    0.22),
+        ('fractions',   0.22),
+        ('algebra',     0.10),
+        ('percentages', 0.11),
+    ],
     'normal': [
         ('integers',    0.30),
         ('decimals',    0.25),

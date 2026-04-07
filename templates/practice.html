@@ -9,12 +9,12 @@
       <span id="stat-correct">0</span> ✓
       <span id="stat-wrong" style="margin-left:12px">0</span> ✗
     </div>
-    <div id="timer-display" class="timer">10</div>
+    <div id="timer-display" class="timer">{{ question_time if question_time else '∞' }}</div>
     <button id="end-btn" class="btn-end" onclick="endSession()">End</button>
   </div>
 
-  <!-- Progress bar (timer) -->
-  <div class="timer-bar-wrap">
+  <!-- Timer bar (hidden for unlimited) -->
+  <div class="timer-bar-wrap" id="timer-bar-wrap"{% if question_time == 0 %} style="visibility:hidden"{% endif %}>
     <div id="timer-bar" class="timer-bar" style="width:100%"></div>
   </div>
 
@@ -24,8 +24,11 @@
     <div class="question-text" id="q-text">{{ question.text }}</div>
   </div>
 
-  <!-- Answer form -->
-  <div class="answer-area" id="answer-area">
+  <!-- Answer area: open answer or multiple choice -->
+  {% if answer_mode == 'mc' %}
+  <div class="options-grid" id="answer-area" style="display:none"></div>
+  {% else %}
+  <div class="answer-area" id="answer-area" style="display:none">
     <input
       type="text"
       id="answer-input"
@@ -35,10 +38,10 @@
       autocorrect="off"
       spellcheck="false"
       placeholder="Your answer"
-      autofocus
     >
     <button class="btn-primary btn-submit" id="submit-btn" onclick="submitAnswer()">Submit</button>
   </div>
+  {% endif %}
 
   <!-- Feedback overlay (hidden by default) -->
   <div class="feedback-overlay" id="feedback-overlay" style="display:none">
@@ -68,8 +71,10 @@
 
 <script>
 const QUESTION_TIME = {{ question_time }};
+const UNLIMITED = QUESTION_TIME === 0;
 const FEEDBACK_DELAY = {{ feedback_delay }};
 const DIFFICULTY = "{{ difficulty }}";
+const ANSWER_MODE = "{{ answer_mode }}";
 const MODE = "practice";
 
 let timerInterval = null;
@@ -82,8 +87,14 @@ let awaitingNext = false;
 
 function startTimer() {
   clearInterval(timerInterval);
-  timeLeft = QUESTION_TIME;
   questionStartTime = Date.now();
+
+  if (UNLIMITED) {
+    document.getElementById('timer-display').textContent = '\u221e';
+    return;
+  }
+
+  timeLeft = QUESTION_TIME;
   updateTimerDisplay();
 
   timerInterval = setInterval(function() {
@@ -97,6 +108,7 @@ function startTimer() {
 }
 
 function updateTimerDisplay() {
+  if (UNLIMITED) return;
   const el = document.getElementById('timer-display');
   const bar = document.getElementById('timer-bar');
   const secs = Math.ceil(timeLeft);
@@ -127,6 +139,28 @@ function submitAnswer() {
   sendAnswer(val, false, elapsed);
 }
 
+function submitMCAnswer(optionIndex) {
+  if (awaitingNext) return;
+  clearInterval(timerInterval);
+  awaitingNext = true;
+  const elapsed = (Date.now() - questionStartTime) / 1000;
+  const timeTaken = UNLIMITED ? elapsed : Math.min(elapsed, QUESTION_TIME);
+  fetch('/submit-answer', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      answer: '',
+      time_taken: timeTaken,
+      skipped: false,
+      mc_selected_index: optionIndex,
+      mc_correct_index: currentQuestion.correct_index
+    })
+  })
+  .then(r => r.json())
+  .then(data => showFeedback(data, false))
+  .catch(() => loadNext());
+}
+
 function sendAnswer(val, skipped, elapsed) {
   elapsed = elapsed || (Date.now() - questionStartTime) / 1000;
   fetch('/submit-answer', {
@@ -134,7 +168,7 @@ function sendAnswer(val, skipped, elapsed) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       answer: val || '',
-      time_taken: Math.min(elapsed, QUESTION_TIME),
+      time_taken: UNLIMITED ? elapsed : Math.min(elapsed, QUESTION_TIME),
       skipped: skipped
     })
   })
@@ -151,25 +185,32 @@ function showFeedback(data, skipped) {
   const timeEl = document.getElementById('feedback-time');
 
   if (skipped || data.result === 'skipped') {
-    icon.textContent = '⏭';
+    icon.textContent = '\u23ed';
     icon.className = 'feedback-icon skipped';
     text.textContent = 'Skipped';
+    ans.textContent = 'Answer: ' + data.display_answer;
   } else if (data.result === 'correct') {
-    icon.textContent = '✓';
+    icon.textContent = '\u2713';
     icon.className = 'feedback-icon correct';
-    text.textContent = 'Correct!';
+    if (data.rounded) {
+      text.textContent = 'Accepted';
+      ans.textContent = 'Exact answer: ' + data.exact_answer;
+    } else {
+      text.textContent = 'Correct!';
+      ans.textContent = 'Answer: ' + data.display_answer;
+    }
     statsCorrect++;
     document.getElementById('stat-correct').textContent = statsCorrect;
   } else {
-    icon.textContent = '✗';
+    icon.textContent = '\u2717';
     icon.className = 'feedback-icon wrong';
     text.textContent = 'Wrong';
+    ans.textContent = 'Answer: ' + data.display_answer;
     statsWrong++;
     document.getElementById('stat-wrong').textContent = statsWrong;
   }
 
-  ans.textContent = 'Answer: ' + data.display_answer;
-  timeEl.textContent = skipped ? '' : data.time_taken + 's';
+  timeEl.textContent = (skipped || data.result === 'skipped') ? '' : data.time_taken + 's';
 
   document.getElementById('answer-area').style.display = 'none';
   overlay.style.display = 'flex';
@@ -194,11 +235,24 @@ function renderQuestion(q) {
     (q.category || '').charAt(0).toUpperCase() + (q.category || '').slice(1);
 
   document.getElementById('feedback-overlay').style.display = 'none';
-  document.getElementById('answer-area').style.display = 'flex';
 
-  const inp = document.getElementById('answer-input');
-  inp.value = '';
-  inp.focus();
+  const answerArea = document.getElementById('answer-area');
+  if (ANSWER_MODE === 'mc') {
+    answerArea.style.display = 'grid';
+    answerArea.innerHTML = '';
+    (q.options || []).forEach(function(opt, i) {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn';
+      btn.textContent = opt;
+      btn.onclick = function() { submitMCAnswer(i); };
+      answerArea.appendChild(btn);
+    });
+  } else {
+    answerArea.style.display = 'flex';
+    const inp = document.getElementById('answer-input');
+    inp.value = '';
+    inp.focus();
+  }
 
   startTimer();
 }
@@ -240,12 +294,30 @@ function submitFlag() {
   }).then(() => closeFlag());
 }
 
-// Submit on Enter
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') submitAnswer();
-});
+// Submit on Enter (open answer mode only)
+if (ANSWER_MODE !== 'mc') {
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') submitAnswer();
+  });
+}
 
-// Boot
-startTimer();
+// Boot: show initial question
+(function() {
+  const answerArea = document.getElementById('answer-area');
+  if (ANSWER_MODE === 'mc') {
+    answerArea.style.display = 'grid';
+    (currentQuestion.options || []).forEach(function(opt, i) {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn';
+      btn.textContent = opt;
+      btn.onclick = function() { submitMCAnswer(i); };
+      answerArea.appendChild(btn);
+    });
+  } else {
+    answerArea.style.display = 'flex';
+    document.getElementById('answer-input').focus();
+  }
+  startTimer();
+})();
 </script>
 {% endblock %}

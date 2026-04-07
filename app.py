@@ -36,15 +36,27 @@ def home():
 def start():
     mode = request.form.get('mode', 'practice')
     difficulty = request.form.get('difficulty', 'normal')
+    timer_str = request.form.get('timer_duration', '10')
+    answer_mode = request.form.get('answer_mode', 'open')
 
     session.clear()
 
     if mode == 'practice':
+        if timer_str == 'unlimited':
+            question_time = 0  # 0 = unlimited sentinel
+        else:
+            try:
+                question_time = int(timer_str)
+            except ValueError:
+                question_time = 10
+
         session['mode'] = 'practice'
         session['difficulty'] = difficulty
         session['level_modifier'] = 0
         session['correct_streak'] = 0
         session['wrong_streak'] = 0
+        session['question_time'] = question_time
+        session['answer_mode'] = answer_mode
         session['stats'] = {
             'total': 0,
             'correct': 0,
@@ -78,12 +90,15 @@ def practice():
     if session.get('mode') != 'practice':
         return redirect(url_for('home'))
     q = session.get('current_q', {})
+    question_time = session.get('question_time', PRACTICE_QUESTION_TIME)
+    answer_mode = session.get('answer_mode', 'open')
     return render_template(
         'practice.html',
         question=q,
-        question_time=PRACTICE_QUESTION_TIME,
+        question_time=question_time,
         feedback_delay=PRACTICE_FEEDBACK_DELAY,
         difficulty=session.get('difficulty', 'normal'),
+        answer_mode=answer_mode,
     )
 
 
@@ -119,11 +134,21 @@ def submit_answer():
     if category in by_cat:
         by_cat[category][0] += 1
 
+    is_rounded = False
     if skipped:
         stats['skipped'] = stats.get('skipped', 0) + 1
         result = 'skipped'
     else:
-        is_correct = _answers_match(user_ans, correct_answer)
+        # Support MC submissions (index comparison bypasses text matching)
+        mc_selected = data.get('mc_selected_index')
+        mc_correct_idx = data.get('mc_correct_index')
+        if mc_selected is not None and mc_correct_idx is not None:
+            is_correct = (int(mc_selected) == int(mc_correct_idx))
+        else:
+            check = _check_answer(user_ans, correct_answer)
+            is_correct = check['correct']
+            is_rounded = check['rounded']
+
         stats['total_time'] = stats.get('total_time', 0.0) + time_taken
 
         if is_correct:
@@ -150,10 +175,19 @@ def submit_answer():
     session['stats'] = stats
     session.modified = True
 
+    exact_answer_display = None
+    if is_rounded:
+        try:
+            exact_answer_display = f'{float(str(correct_answer)):.6f}'.rstrip('0').rstrip('.')
+        except (ValueError, TypeError):
+            exact_answer_display = display_answer
+
     return jsonify({
         'result': result,
         'display_answer': display_answer,
         'time_taken': round(time_taken, 1),
+        'rounded': is_rounded,
+        'exact_answer': exact_answer_display,
     })
 
 
@@ -241,6 +275,12 @@ def flag():
         return jsonify({'ok': False, 'error': str(exc)}), 500
 
 
+@app.route('/quit')
+def quit_game():
+    session.clear()
+    return redirect(url_for('home'))
+
+
 @app.route('/flags')
 def flags():
     try:
@@ -262,21 +302,49 @@ def _next_practice_question():
     category = random.choice(CATEGORIES)
     difficulty = session.get('difficulty', 'normal')
     level_modifier = session.get('level_modifier', 0)
+    use_mc = session.get('answer_mode', 'open') == 'mc'
     return generate_question(category, difficulty,
                              level_modifier=level_modifier,
-                             multiple_choice=False)
+                             multiple_choice=use_mc)
+
+
+def _check_answer(user: str, correct) -> dict:
+    """Returns {'correct': bool, 'rounded': bool}.
+
+    Accepts if within 0.2% relative tolerance (exact) or within 0.005
+    absolute tolerance (rounded — triggers special feedback message).
+    Also handles fraction strings like '3/4'.
+    """
+    try:
+        user_clean = user.strip().replace(',', '.')
+        if '/' in user_clean and not any(c in user_clean for c in ['+', '-', 'x', '*']):
+            parts = user_clean.split('/')
+            if len(parts) == 2:
+                u = float(parts[0].strip()) / float(parts[1].strip())
+            else:
+                u = float(user_clean)
+        else:
+            u = float(user_clean)
+        c = float(str(correct))
+        diff = abs(u - c)
+        # Exact match: within 0.2% relative tolerance
+        if c == 0:
+            is_exact = diff < 1e-6
+        else:
+            is_exact = diff / max(abs(c), 1e-9) < 0.002
+        if is_exact:
+            return {'correct': True, 'rounded': False}
+        # Rounded match: within 0.005 absolute tolerance
+        is_rounded = diff <= 0.005
+        return {'correct': is_rounded, 'rounded': is_rounded}
+    except (ValueError, AttributeError, ZeroDivisionError):
+        exact = user.strip() == str(correct).strip()
+        return {'correct': exact, 'rounded': False}
 
 
 def _answers_match(user: str, correct) -> bool:
-    """Tolerant numeric comparison."""
-    try:
-        u = float(user.replace(',', '.'))
-        c = float(str(correct))
-        if c == 0:
-            return abs(u) < 1e-6
-        return abs(u - c) / max(abs(c), 1e-9) < 0.002
-    except (ValueError, AttributeError):
-        return user.strip() == str(correct).strip()
+    """Tolerant numeric comparison (used by test mode)."""
+    return _check_answer(user, correct)['correct']
 
 
 if __name__ == '__main__':
