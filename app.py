@@ -3,6 +3,9 @@ MindMath Trainer – Flask application.
 All routes live here.
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 import json
 import time
@@ -18,7 +21,17 @@ from question_engine import generate_question, generate_test_questions
 from scoring import compute_practice_stats, compute_test_stats
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'mindmath-dev-secret-change-in-prod')
+
+_flask_env = os.environ.get('FLASK_ENV', 'production')
+if _flask_env == 'development':
+    app.secret_key = os.environ.get('SECRET_KEY', 'mindmath-dev-secret-change-in-prod')
+else:
+    _secret = os.environ.get('SECRET_KEY')
+    if not _secret:
+        raise RuntimeError(
+            "SECRET_KEY environment variable is not set. Set it before deploying."
+        )
+    app.secret_key = _secret
 
 FLAGGED_FILE = os.path.join(os.path.dirname(__file__), 'flagged_questions.json')
 
@@ -348,4 +361,4 @@ def _answers_match(user: str, correct) -> bool:
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=os.environ.get('FLASK_ENV') == 'development')
