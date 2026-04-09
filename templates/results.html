@@ -84,9 +84,56 @@
     </table>
   </section>
 
+  {% if question_log %}
+  <!-- Question Log: collapsible, card-per-question, server-rendered -->
+  <section class="card question-log-section">
+    <div class="question-log-header" onclick="toggleLog(this)">
+      <span>Question Log ({{ question_log | length }} questions)</span>
+      <span class="log-toggle-icon">▼</span>
+    </div>
+    <div class="question-log-body" id="question-log-body" style="display:none">
+      {% for entry in question_log %}
+      <div class="q-log-card q-log-{{ entry.result }}">
+        <div class="q-log-top">
+          <span class="q-log-num">#{{ entry.number }}</span>
+          <span class="q-log-cat">{{ entry.category | upper }}</span>
+          {% if entry.time_taken is not none %}
+          <span class="q-log-time">{{ entry.time_taken }}s</span>
+          {% endif %}
+        </div>
+        <div class="q-log-text">{{ entry.question_text }}</div>
+        <div class="q-log-result q-log-result-{{ entry.result }}">
+          {% if entry.result == 'correct' %}✓ Correct
+          {% elif entry.result == 'wrong' %}✗ Wrong
+          {% else %}— Skipped{% endif %}
+        </div>
+        <div class="q-log-answers">
+          <span>Your: <strong>{{ entry.user_answer }}</strong></span>
+          <span class="q-log-correct-ans{% if entry.result == 'wrong' %} q-log-correct-bold{% endif %}">Correct: <strong>{{ entry.correct_answer }}</strong></span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   <div class="results-actions">
     <a href="/" class="btn-primary btn-home">Home</a>
   </div>
 
 </div>
+
+<script>
+function toggleLog(header) {
+  var body = document.getElementById('question-log-body');
+  var icon = header.querySelector('.log-toggle-icon');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    icon.textContent = '▲';
+  } else {
+    body.style.display = 'none';
+    icon.textContent = '▼';
+  }
+}
+</script>
 {% endblock %}

@@ -49,27 +49,27 @@
     <div class="numpad-display empty" id="numpad-display">Your answer</div>
     <div class="numpad-wrap">
       <div class="numpad-grid">
-        <button class="numpad-key" onclick="kbAppend('7')">7</button>
-        <button class="numpad-key" onclick="kbAppend('8')">8</button>
-        <button class="numpad-key" onclick="kbAppend('9')">9</button>
-        <button class="numpad-key" onclick="kbAppend('4')">4</button>
-        <button class="numpad-key" onclick="kbAppend('5')">5</button>
-        <button class="numpad-key" onclick="kbAppend('6')">6</button>
-        <button class="numpad-key" onclick="kbAppend('1')">1</button>
-        <button class="numpad-key" onclick="kbAppend('2')">2</button>
-        <button class="numpad-key" onclick="kbAppend('3')">3</button>
-        <button class="numpad-key" onclick="kbAppend('.')">.</button>
-        <button class="numpad-key" onclick="kbAppend('0')">0</button>
-        <button class="numpad-key" onclick="kbAppend('/')">/</button>
+        <button class="numpad-key" ontouchstart="numpadKey('7',event)" onclick="kbAppend('7')">7</button>
+        <button class="numpad-key" ontouchstart="numpadKey('8',event)" onclick="kbAppend('8')">8</button>
+        <button class="numpad-key" ontouchstart="numpadKey('9',event)" onclick="kbAppend('9')">9</button>
+        <button class="numpad-key" ontouchstart="numpadKey('4',event)" onclick="kbAppend('4')">4</button>
+        <button class="numpad-key" ontouchstart="numpadKey('5',event)" onclick="kbAppend('5')">5</button>
+        <button class="numpad-key" ontouchstart="numpadKey('6',event)" onclick="kbAppend('6')">6</button>
+        <button class="numpad-key" ontouchstart="numpadKey('1',event)" onclick="kbAppend('1')">1</button>
+        <button class="numpad-key" ontouchstart="numpadKey('2',event)" onclick="kbAppend('2')">2</button>
+        <button class="numpad-key" ontouchstart="numpadKey('3',event)" onclick="kbAppend('3')">3</button>
+        <button class="numpad-key" ontouchstart="numpadKey('.',event)" onclick="kbAppend('.')">.</button>
+        <button class="numpad-key" ontouchstart="numpadKey('0',event)" onclick="kbAppend('0')">0</button>
+        <button class="numpad-key" ontouchstart="numpadKey('/',event)" onclick="kbAppend('/')">/</button>
       </div>
       <div class="numpad-actions">
-        <button class="numpad-backspace" onclick="kbBackspace()">⌫</button>
-        <button class="numpad-minus" onclick="kbAppend('-')">−</button>
+        <button class="numpad-backspace" ontouchstart="numpadBksp(event)" onclick="kbBackspace()">⌫</button>
+        <button class="numpad-minus" ontouchstart="numpadKey('-',event)" onclick="kbAppend('-')">−</button>
         <button class="numpad-submit" id="numpad-submit-btn" onclick="submitAnswer()">✓</button>
       </div>
     </div>
     {% endif %}
-    <button class="btn-skip" id="skip-btn" onclick="skipQuestion()">Skip</button>
+    <button class="btn-skip" id="skip-btn" ontouchstart="skipTap(event)" onclick="skipQuestion()">Skip</button>
   </div>
 
   <!-- Pause overlay (open-answer mode only; position:fixed escapes overflow:hidden) -->
@@ -175,6 +175,23 @@ function updateTimerDisplay() {
     el.classList.remove('urgent');
     bar.classList.remove('urgent');
   }
+}
+
+// ── TOUCH HELPERS ────────────────────────────────────────────────────────────
+// touchstart fires at finger-down; e.preventDefault() suppresses the subsequent
+// click so handlers don't fire twice on touch devices.
+
+function numpadKey(ch, e) {
+  if (e && e.type === 'touchstart') e.preventDefault();
+  kbAppend(ch);
+}
+function numpadBksp(e) {
+  if (e && e.type === 'touchstart') e.preventDefault();
+  kbBackspace();
+}
+function skipTap(e) {
+  if (e && e.type === 'touchstart') e.preventDefault();
+  skipQuestion();
 }
 
 // ── NUMPAD ───────────────────────────────────────────────────────────────────
@@ -455,6 +472,7 @@ function renderQuestion(q) {
       const btn = document.createElement('button');
       btn.className = 'option-btn';
       btn.textContent = opt;
+      btn.addEventListener('touchstart', function(e) { e.preventDefault(); submitMCAnswer(i); });
       btn.onclick = function() { submitMCAnswer(i); };
       answerArea.appendChild(btn);
     });
@@ -536,6 +554,7 @@ function submitFlag() {
       const btn = document.createElement('button');
       btn.className = 'option-btn';
       btn.textContent = opt;
+      btn.addEventListener('touchstart', function(e) { e.preventDefault(); submitMCAnswer(i); });
       btn.onclick = function() { submitMCAnswer(i); };
       answerArea.appendChild(btn);
     });

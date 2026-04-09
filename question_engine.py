@@ -556,11 +556,11 @@ def _gen_percentages(difficulty, rng, level_modifier=0):
         if kind == 'pct_increase':
             original = rng.randint(50, 400)
             pct = rng.choice([10, 20, 25, 50, 15])
-            new_val = round(original * (1 + pct / 100))
+            new_val = _trunc(original * (1 + pct / 100), 2)
             return _q(f'{original} increased by {pct}% =', new_val)
         original = rng.randint(100, 500)
         pct = rng.choice([10, 20, 25, 50])
-        new_val = round(original * (1 - pct / 100))
+        new_val = _trunc(original * (1 - pct / 100), 2)
         return _q(f'{original} decreased by {pct}% =', new_val)
 
     # hard
@@ -716,59 +716,131 @@ def _fraction_distractors(answer, correct_display, rng, n=3):
 
 
 def _numeric_distractors(answer, correct_display, rng, n=3):
-    """Generate plausible numeric distractors."""
+    """Generate plausible numeric distractors using a multi-strategy pool."""
     try:
         ans_f = float(answer)
     except (TypeError, ValueError):
         return ['0', '1', '2']
 
+    # Decimal places to match the correct answer format
+    if isinstance(answer, int):
+        places = 0
+    else:
+        ref_s = _auto_display(answer)
+        places = len(ref_s.split('.')[1]) if '.' in ref_s else 0
+
+    abs_a = abs(ans_f)
+
+    def _candidate():
+        strategy = rng.randint(0, 4)
+        if strategy == 0:
+            # Off by a small percentage
+            pct = rng.choice([0.05, 0.1, 0.15, 0.2, -0.05, -0.1, -0.15, -0.2])
+            return round(ans_f * (1 + pct), places)
+        elif strategy == 1:
+            # Magnitude-scaled plausible arithmetic error
+            if abs_a < 10:
+                offset = rng.choice([1, 2, 3])
+            elif abs_a < 100:
+                offset = rng.choice([2, 5, 10])
+            elif abs_a < 1000:
+                offset = rng.choice([5, 10, 20, 50])
+            else:
+                offset = rng.choice([10, 50, 100])
+            return round(ans_f + rng.choice([-1, 1]) * offset, places)
+        elif strategy == 2:
+            # Common mental math mistake
+            kind = rng.randint(0, 1)
+            if kind == 0:
+                # Round to nearest 5 or 10
+                target = rng.choice([5.0, 10.0])
+                return round(round(ans_f / target) * target, places)
+            else:
+                # Apply a percentage error twice (compound mistake)
+                pct = rng.choice([0.05, 0.1, 0.15, -0.05, -0.1, -0.15])
+                return round(ans_f * (1 + pct) * (1 + pct), places)
+        elif strategy == 3:
+            # Plausible neighbour in 70%–130% of answer range
+            if abs_a > 0.001:
+                lo = min(ans_f * 0.7, ans_f * 1.3)
+                hi = max(ans_f * 0.7, ans_f * 1.3)
+            else:
+                lo, hi = ans_f - 5.0, ans_f + 5.0
+            if abs(hi - lo) < 0.01:
+                lo, hi = ans_f - 1.0, ans_f + 1.0
+            return round(lo + rng.random() * (hi - lo), places)
+        else:
+            # Sign flip
+            return round(-ans_f, places)
+
     seen = {correct_display}
     results = []
-    attempts = 0
+    sign_flips = 0
 
-    while len(results) < n and attempts < 200:
-        attempts += 1
-        d = _distractor_candidate(ans_f, rng)
-        s = _distractor_fmt(d, answer)
-        if s not in seen and s != correct_display:
+    # Negative correct answer: force at least one positive distractor to test sign awareness
+    if ans_f < 0 and abs_a > 0.001:
+        pos_d = round(abs_a * rng.uniform(0.8, 1.2), places)
+        s = _distractor_fmt(pos_d, answer)
+        if s not in seen:
             seen.add(s)
             results.append(s)
 
-    while len(results) < n:
-        fill = str(int(round(ans_f)) + len(results) + 1)
-        if fill not in seen:
-            results.append(fill)
-            seen.add(fill)
+    attempts = 0
+    while len(results) < n and attempts < 300:
+        attempts += 1
+        d = _candidate()
+
+        # Must differ from correct answer by at least 2% of magnitude or 0.001
+        min_diff = max(abs_a * 0.02, 0.001)
+        if abs(d - ans_f) < min_diff:
+            continue
+
+        # Reject if 10× or more different from correct (obviously eliminable)
+        if abs_a > 0.001 and abs(d) > 0.001:
+            ratio = abs(d) / abs_a
+            if ratio > 9.0 or ratio < 0.111:
+                continue
+
+        # Positive correct answer: at most 1 sign-flipped (negative) distractor
+        if ans_f > 0 and d < 0 and sign_flips >= 1:
+            continue
+
+        s = _distractor_fmt(d, answer)
+        if s in seen or s == correct_display:
+            continue
+
+        # Must differ from already-chosen distractors
+        too_close = False
+        for existing in results:
+            try:
+                if abs(float(existing) - d) < 0.001:
+                    too_close = True
+                    break
+            except ValueError:
+                pass
+        if too_close:
+            continue
+
+        seen.add(s)
+        results.append(s)
+        if ans_f > 0 and d < 0:
+            sign_flips += 1
+
+    # Fallback: simple scaled offsets
+    for step in range(1, 30):
+        if len(results) >= n:
+            break
+        for sgn in [1, -1]:
+            if len(results) >= n:
+                break
+            offset = step * max(abs_a * 0.1, 1)
+            d = round(ans_f + sgn * offset, places)
+            s = _distractor_fmt(d, answer)
+            if s not in seen:
+                seen.add(s)
+                results.append(s)
 
     return results[:n]
-
-
-def _distractor_candidate(ans_f, rng):
-    strategy = rng.randint(0, 5)
-    if strategy == 5:
-        return -ans_f
-    if strategy == 0:
-        if abs(ans_f) >= 500:
-            delta = rng.choice([-50, -20, 20, 50, -100, 100])
-        elif abs(ans_f) >= 100:
-            delta = rng.choice([-20, -10, -5, 5, 10, 20])
-        elif abs(ans_f) >= 10:
-            delta = rng.choice([-5, -3, -2, -1, 1, 2, 3, 5])
-        else:
-            delta = rng.choice([-2, -1, 1, 2])
-        return ans_f + delta
-    if strategy == 1:
-        pct = rng.choice([0.05, 0.08, 0.10, 0.15, 0.20,
-                          -0.05, -0.08, -0.10, -0.15, -0.20])
-        return ans_f * (1 + pct)
-    if strategy == 2:
-        if abs(ans_f) >= 10:
-            return ans_f + rng.choice([-9, 9, -11, 11])
-        return ans_f + rng.choice([-3, 3])
-    if strategy == 3:
-        factor = rng.choice([10, 0.1])
-        return ans_f * factor
-    return ans_f + rng.choice([-1, 1]) * max(abs(ans_f) * 0.1, 1)
 
 
 def _distractor_fmt(d, reference_answer):

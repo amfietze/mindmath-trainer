@@ -62,6 +62,8 @@ These decisions are intentional and must not be undone without explicit instruct
 - **No database** — session stats are in-memory only (lost on session end). Flagged questions write to `flagged_questions.json` (append-only, one JSON array).
 - **Flask server-side sessions** hold all game state: current question, streaks, level modifier, stats, test questions array. No client-side persistence.
 - **Question transitions via AJAX** — no full page reloads during a session (`/next-question`, `/submit-answer`, `/end-session`, `/end-test` are all JSON endpoints).
+- **`viewport-fit=cover`** is set in the viewport meta tag to enable `env(safe-area-inset-top/bottom)` for iPhone safe area insets (Dynamic Island, notch, home indicator).
+- **`session['question_log']`** is initialised as `[]` at session start for both modes. In Practice Mode, every `/submit-answer` call appends one entry. In Test Mode, the full log is built in `/end-test` from `test_questions` + `chosen_answers`. The log is passed to `results.html` as the `question_log` template variable.
 - **Question pre-validation**: all questions served through `get_validated_question()` in `question_engine.py` which applies a 7-point check (finite answer, display parses close to answer, no duplicate MC options, text non-empty with operator, etc.). Retries up to 50 times; falls back to Easy with a `stderr` warning if max attempts exceeded.
 - **`host="0.0.0.0"`** — app binds to all interfaces so it is reachable over local WiFi from iPhone.
 - **PWA manifest + Apple meta tags** in `base.html` for full-screen iPhone install via Add to Home Screen.
@@ -86,14 +88,33 @@ These decisions are intentional and must not be undone without explicit instruct
 - Session ends at "End" button → `/end-session` POST → redirects to `/results`.
 - Stats tracked: total, correct, wrong, skipped, total_time, by_category.
 
+### Results Screen
+After any session, `results.html` shows:
+1. Badge + big score / question count.
+2. Summary stats card (correct / wrong / skipped, percentages, avg time).
+3. Category breakdown table.
+4. **Question Log** (collapsible, default collapsed): header "Question Log (N questions)". Toggle via single tap/click on header. Body has `max-height: 60vh; overflow-y: auto`. One card per question: number, category pill, question text, result (✓/✗/—), your answer vs correct answer. Left border colour: green (correct), red (wrong), grey (skipped). Wrong-answer cards show the correct answer in larger/bolder style. Server-rendered via Jinja2 — no JS rendering loop. Practice: `time_taken` shown per card. Test Mode: time shown as `None` (omitted).
+
 ### UX / Layout (game screens)
 - Game screens (`.practice-screen`, `.test-screen`): `height: 100dvh; overflow: hidden; flex column`.
+- **Safe area**: `.practice-screen` and `.test-screen` use `padding: calc(12px + env(safe-area-inset-top, 0px)) 16px calc(8px + env(safe-area-inset-bottom, 0px))`. This clears the Dynamic Island / notch on all iPhone models automatically. Requires `viewport-fit=cover` in the meta tag.
+- **Touch latency**: `touch-action: manipulation`, `-webkit-tap-highlight-color: transparent`, and `-webkit-touch-callout: none` applied globally via the `*` reset. Numpad digit/dot/slash/minus/backspace keys fire on `touchstart` (e.preventDefault() suppresses the subsequent click to avoid double-firing). The numpad submit (✓) and form submits use `click` / `touchend` only to prevent accidental submissions.
 - **Top bar** — `min-height: 52px; flex-shrink: 0`. Practice: `[stat-mini] [timer] [⏸] [🚩] [End]`. Test: `[✕Quit] [Q counter] [timer] [score] [🚩]`. Flag button uses `btn-pause` class in both.
 - **Question zone** (`.middle-zone`) — `flex: 2` (40% of remaining height). Question text `clamp(1.6rem, 5vw, 2.2rem)`. Feedback overlay is `position: absolute; inset: 0` within this zone.
 - **Answer zone** (`.bottom-zone`) — `flex: 3` (60% of remaining height). Contains MC options or numpad, plus Skip button (40px fixed height).
 - MC buttons: vertical flex column (`options-grid`), each `flex: 1; min-height: 56px`. 4 buttons fill the zone proportionally.
 - Custom numpad: 4×3 `numpad-grid` (flex:1 within `numpad-wrap`), 52px actions row (⌫ + − + ✓), 48px display. The `−` key inserts `-` only as the first character (negative answers). Display shows "Your answer" placeholder when empty; font auto-shrinks from 1.8rem down to 1.0rem for long inputs.
 - Home and Results screens scroll freely (`min-height: 100dvh`, no `overflow: hidden`).
+
+### Distractor Generation (MC mode)
+`_numeric_distractors()` in `question_engine.py` uses a 5-strategy pool per distractor attempt (up to 300 attempts):
+1. **Percentage offset**: `answer × (1 ± 5/10/15/20%)` — rounded to same decimal places as answer.
+2. **Magnitude-scaled error**: `answer ± offset` where offset scales with `abs(answer)` (1–3 for <10, 2–10 for <100, 5–50 for <1000, 10–100 for ≥1000).
+3. **Mental math mistake**: round to nearest 5/10, or apply a percentage error twice.
+4. **Plausible neighbour**: random value in 70%–130% of answer range.
+5. **Sign flip**: `-answer` (used at most once for positive correct answers; forced at least once for negative correct answers).
+
+Constraints: all 4 options distinct within 0.001; no distractor >9× or <0.111× the correct answer; at most 1 negative distractor when correct answer is positive.
 
 ### Test Mode
 - Exactly 80 questions, fixed 8-minute global timer.
@@ -165,6 +186,8 @@ Five categories, generated in `question_engine.py`:
 | `fractions` | Fraction operations; difficulty scales from unit fractions to mixed number chains |
 | `algebra` | Equation solving for x; difficulty scales from one-step to bracket/multi-variable |
 | `percentages` | % calculations; difficulty scales from round % to compound/nested/reverse |
+
+**Percentages — exact decimal answers**: `correct_answer` stores the mathematically exact result with no integer rounding. Examples: `53 × 1.1 = 58.3` (not 58), `446 × 0.9 = 401.4` (not 401), `80 × 1.15 = 92` (integer result, int stored), `70 × 0.95 = 66.5`. The `_trunc(val, 2)` helper is used instead of `round()` or `int()` so whole-number results are stored as `int` and non-integer results as `float`.
 
 **Test Mode Normal distribution** (from `TEST_DISTRIBUTION` in `config.py`):
 ~30% integers, 25% decimals, 25% fractions, 10% algebra, 10% percentages.
@@ -257,6 +280,14 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-04-09]** — Session 5: five fixes + one new feature from iPhone device testing:
+  1. **Touch delay fix** — Added `-webkit-tap-highlight-color: transparent`, `-webkit-touch-callout: none`, `touch-action: manipulation` to global `*` reset. Added `user-select: none; -webkit-user-select: none` to all interactive element classes. Numpad digit/dot/slash/minus/backspace keys now fire on `touchstart` (via `ontouchstart` HTML attribute + `e.preventDefault()` to suppress click double-fire). MC option buttons and Skip button also get touchstart listeners. Submit (✓) keeps click-only. `touch-action: manipulation` already eliminates 300ms tap delay; touchstart additionally fires at finger-down not finger-lift.
+  2. **MC distractors** — Replaced `_distractor_candidate()` + simple loop in `_numeric_distractors()` with a 5-strategy pool approach: percentage offsets, magnitude-scaled errors, mental math mistakes, plausible neighbours (70–130% range), sign flips. Constraints: ≤1 sign-flip for positive answers, ≥1 positive for negative answers, no 10× differences, 300-attempt loop with scaled fallback.
+  3. **iPhone safe area** — `.practice-screen` and `.test-screen` now use `padding: calc(12px + env(safe-area-inset-top, 0px)) 16px calc(8px + env(safe-area-inset-bottom, 0px))`. This clears Dynamic Island / notch / home indicator on all iPhone models. `viewport-fit=cover` was already set.
+  4. **Percentage answers** — Removed `round()` from `pct_increase` and `pct_decrease` generators in `_gen_percentages()`. Now uses `_trunc(..., 2)` which stores exact decimal results (e.g. 53×1.1=58.3, 446×0.9=401.4) without truncating to integer.
+  5. **Question log** — `session['question_log']` initialised at session start for both modes. Practice: appended per answer in `/submit-answer`. Test: built in `/end-test` from questions + chosen answers. Passed to `results.html` as `question_log`. Results screen shows collapsible "Question Log (N questions)" section: per-card layout with colour-coded left border, question text, result, your answer vs correct, time (Practice only). Server-rendered Jinja2, `max-height: 60vh; overflow-y: auto`.
+  6. **CLAUDE.md** updated: Architecture Decisions, UX/Layout, Question Categories, Distractor Generation, Results Screen sections all updated.
 
 - **[2026-04-09]** — Session 4: four targeted fixes from real-device testing:
   1. **Negative answers enabled** — `_gen_integers` (Medium/Normal subtraction: 30% chance b > a → negative result), `_gen_decimals` (Medium sub1: 30% chance negative), `_gen_fractions` (Medium + Normal: added `frac_sub` type; result may be negative), `_gen_algebra` (Medium/Normal/Hard: 30% chance x is negative). `_distractor_candidate` gains strategy 5: sign flip (`-ans_f`). `-` key added to numpad action row (allowed only as first char). `submitAnswer()` guards against lone `-`. `_check_answer()` fraction parser now accepts `-3/4` format (removed `-` from operator exclusion list).

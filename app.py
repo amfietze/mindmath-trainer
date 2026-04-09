@@ -79,6 +79,7 @@ def start():
             'total_time': 0.0,
             'by_category': {cat: [0, 0] for cat in CATEGORIES},
         }
+        session['question_log'] = []
         first_q = _next_practice_question()
         session['current_q'] = first_q
         return redirect(url_for('practice'))
@@ -91,6 +92,7 @@ def start():
         # Generate all 80 questions now; store compactly
         questions = generate_test_questions(seed, difficulty, TEST_QUESTIONS)
         session['test_questions'] = questions
+        session['question_log'] = []
         session['start_time'] = time.time()
         return redirect(url_for('test'))
 
@@ -187,6 +189,29 @@ def submit_answer():
                 session['wrong_streak'] = 0
 
     session['stats'] = stats
+
+    # Append to question log
+    if skipped:
+        log_user_answer = '—'
+    elif mc_selected is not None:
+        options = current_q.get('options', [])
+        mc_idx = int(mc_selected)
+        log_user_answer = options[mc_idx] if mc_idx < len(options) else str(mc_selected)
+    else:
+        log_user_answer = user_ans if user_ans else '—'
+
+    q_log = session.get('question_log', [])
+    q_log.append({
+        'number': stats.get('total', 0),
+        'question_text': current_q.get('text', ''),
+        'category': current_q.get('category', ''),
+        'difficulty': session.get('difficulty', 'normal'),
+        'user_answer': log_user_answer,
+        'correct_answer': str(display_answer),
+        'result': result,
+        'time_taken': round(time_taken, 1),
+    })
+    session['question_log'] = q_log
     session.modified = True
 
     exact_answer_display = None
@@ -247,6 +272,36 @@ def end_test():
     questions = session.get('test_questions', [])
     results = compute_test_stats(questions, chosen_answers, elapsed)
 
+    # Build question log for test mode
+    difficulty = session.get('difficulty', 'normal')
+    question_log = []
+    for i, q in enumerate(questions):
+        chosen_idx = chosen_answers[i] if i < len(chosen_answers) else None
+        correct_idx = q.get('correct_index')
+        options = q.get('options', [])
+        correct_display = (options[correct_idx]
+                           if correct_idx is not None and correct_idx < len(options)
+                           else str(q.get('display_answer', '')))
+        if chosen_idx is None:
+            q_result = 'skipped'
+            user_answer = '—'
+        elif chosen_idx == correct_idx:
+            q_result = 'correct'
+            user_answer = options[chosen_idx] if chosen_idx < len(options) else str(chosen_idx)
+        else:
+            q_result = 'wrong'
+            user_answer = options[chosen_idx] if chosen_idx < len(options) else str(chosen_idx)
+        question_log.append({
+            'number': i + 1,
+            'question_text': q.get('text', ''),
+            'category': q.get('category', ''),
+            'difficulty': difficulty,
+            'user_answer': user_answer,
+            'correct_answer': correct_display,
+            'result': q_result,
+            'time_taken': None,
+        })
+    session['question_log'] = question_log
     session['results'] = results
     session['mode'] = 'results'
     session.modified = True
@@ -259,7 +314,9 @@ def end_test():
 def results():
     if session.get('mode') != 'results':
         return redirect(url_for('home'))
-    return render_template('results.html', results=session.get('results', {}))
+    return render_template('results.html',
+                           results=session.get('results', {}),
+                           question_log=session.get('question_log', []))
 
 
 # ─── flagging ─────────────────────────────────────────────────────────────────

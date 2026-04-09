@@ -42,7 +42,7 @@
   <!-- Bottom zone: MC options + skip -->
   <div class="bottom-zone">
     <div class="options-grid" id="options-grid"></div>
-    <button class="btn-skip" id="skip-btn" onclick="chooseAnswer(null)">Skip</button>
+    <button class="btn-skip" id="skip-btn" ontouchstart="skipTap(event)" onclick="chooseAnswer(null)">Skip</button>
   </div>
 
 
@@ -123,6 +123,7 @@ function renderQuestion(idx) {
     const btn = document.createElement('button');
     btn.className = 'option-btn';
     btn.textContent = opt;
+    btn.addEventListener('touchstart', function(e) { e.preventDefault(); chooseAnswer(i); });
     btn.onclick = function() { chooseAnswer(i); };
     grid.appendChild(btn);
   });
@@ -206,6 +207,12 @@ function submitFlag() {
       user_comment: comment
     })
   }).then(() => closeFlag());
+}
+
+// Skip touchstart helper (fires at finger-down; preventDefault suppresses click)
+function skipTap(e) {
+  if (e && e.type === 'touchstart') e.preventDefault();
+  chooseAnswer(null);
 }
 
 // Quit
