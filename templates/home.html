@@ -108,7 +108,7 @@
       </div>
     </section>
 
-    <button type="submit" class="btn-primary btn-start">Start</button>
+    <button type="button" class="btn-primary btn-start" id="start-btn">Start</button>
   </form>
 
   <footer class="home-footer">
@@ -165,5 +165,22 @@
   // Initialize
   var checkedMode = document.querySelector('input[name="mode"]:checked');
   if (checkedMode) updateSettingsForMode(checkedMode.value);
+
+  // Start button: touchend fires at finger-lift with no delay.
+  // e.preventDefault() suppresses the synthesized click iOS generates after
+  // touchend. Timestamp guard prevents double-fire on non-touch devices.
+  (function() {
+    var btn = document.getElementById('start-btn');
+    var lastTouch = 0;
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      lastTouch = Date.now();
+      document.getElementById('startForm').submit();
+    }, { passive: false });
+    btn.addEventListener('click', function() {
+      if (Date.now() - lastTouch < 600) return;
+      document.getElementById('startForm').submit();
+    });
+  })();
 </script>
 {% endblock %}

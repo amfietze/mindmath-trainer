@@ -98,7 +98,11 @@ After any session, `results.html` shows:
 ### UX / Layout (game screens)
 - Game screens (`.practice-screen`, `.test-screen`): `height: 100dvh; overflow: hidden; flex column`.
 - **Safe area**: `.practice-screen` and `.test-screen` use `padding: calc(12px + env(safe-area-inset-top, 0px)) 16px calc(8px + env(safe-area-inset-bottom, 0px))`. This clears the Dynamic Island / notch on all iPhone models automatically. Requires `viewport-fit=cover` in the meta tag.
-- **Touch latency**: `touch-action: manipulation`, `-webkit-tap-highlight-color: transparent`, and `-webkit-touch-callout: none` applied globally via the `*` reset. Numpad digit/dot/slash/minus/backspace keys fire on `touchstart` (e.preventDefault() suppresses the subsequent click to avoid double-firing). The numpad submit (✓) and form submits use `click` / `touchend` only to prevent accidental submissions.
+- **Touch latency**: `touch-action: manipulation`, `-webkit-tap-highlight-color: transparent`, and `-webkit-touch-callout: none` applied globally via the `*` reset. Also explicitly set on `.top-bar`, `.top-bar button/a`, and `.btn-start`. Three event tiers:
+  - **touchstart** — digit/dot/slash/minus/backspace numpad keys and MC option buttons. Fires at finger-DOWN (fastest). `e.preventDefault()` suppresses the subsequent click. Safe because these actions are non-destructive.
+  - **touchend** — Start button (home), numpad ✓ submit, pause/flag/end buttons (practice top bar), quit/flag buttons (test top bar). Fires at finger-LIFT. `e.preventDefault()` suppresses synthesized click. A timestamp guard (`Date.now() - lastTouch < 600ms`) in the companion click listener prevents double-fire on any browser that still sends the synthesized click. Used for destructive or irreversible actions so the user can slide their finger away to cancel.
+  - **click only** — confirmation dialog buttons (Cancel, Yes quit), flag-modal Submit/Cancel. These are already inside a deliberate modal flow so the 300ms latency is acceptable and changing them would add complexity for no UX gain.
+  - Start button is `type="button"` (not `type="submit"`) so form.submit() is called exclusively by JS, eliminating any risk of double-form-submission.
 - **Top bar** — `min-height: 52px; flex-shrink: 0`. Practice: `[stat-mini] [timer] [⏸] [🚩] [End]`. Test: `[✕Quit] [Q counter] [timer] [score] [🚩]`. Flag button uses `btn-pause` class in both.
 - **Question zone** (`.middle-zone`) — `flex: 2` (40% of remaining height). Question text `clamp(1.6rem, 5vw, 2.2rem)`. Feedback overlay is `position: absolute; inset: 0` within this zone.
 - **Answer zone** (`.bottom-zone`) — `flex: 3` (60% of remaining height). Contains MC options or numpad, plus Skip button (40px fixed height).
@@ -280,6 +284,14 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-04-09]** — Session 6: touch latency follow-up — converted remaining onclick buttons to touchend:
+  - `home.html` Start button: `type="submit"` → `type="button"` (id `start-btn`); touchend + timestamp-guarded click fallback calls `form.submit()`.
+  - `practice.html` pause/flag/end top-bar buttons: removed `onclick=`, bound via `bindBtn()` in script.
+  - `practice.html` numpad ✓ submit: removed `onclick=`, bound via `bindBtn()` (touchend fires at finger-lift, preventing accidental submit).
+  - `test.html` quit/flag top-bar buttons: removed `onclick=`, bound via `bindBtn()`.
+  - `style.css`: added explicit `touch-action: manipulation` to `.top-bar`, `.top-bar button`, `.top-bar a`, `.btn-start`.
+  - `CLAUDE.md`: documented three-tier event strategy (touchstart / touchend / click-only).
 
 - **[2026-04-09]** — Session 5: five fixes + one new feature from iPhone device testing:
   1. **Touch delay fix** — Added `-webkit-tap-highlight-color: transparent`, `-webkit-touch-callout: none`, `touch-action: manipulation` to global `*` reset. Added `user-select: none; -webkit-user-select: none` to all interactive element classes. Numpad digit/dot/slash/minus/backspace keys now fire on `touchstart` (via `ontouchstart` HTML attribute + `e.preventDefault()` to suppress click double-fire). MC option buttons and Skip button also get touchstart listeners. Submit (✓) keeps click-only. `touch-action: manipulation` already eliminates 300ms tap delay; touchstart additionally fires at finger-down not finger-lift.

@@ -5,7 +5,7 @@
 
   <!-- Top bar: global timer + score + progress -->
   <div class="top-bar test-top-bar">
-    <button class="quit-btn" id="quit-btn" onclick="showQuitConfirm()">&#x2715; Quit</button>
+    <button class="quit-btn" id="quit-btn">&#x2715; Quit</button>
     <div class="test-progress">
       <span id="q-counter">Q 1 / {{ total_questions }}</span>
     </div>
@@ -14,7 +14,7 @@
       <span id="score-val">0</span>
       <span class="score-label"> pts</span>
     </div>
-    <button id="flag-btn" class="btn-pause" onclick="openFlag()">🚩</button>
+    <button id="flag-btn" class="btn-pause">🚩</button>
   </div>
 
   <!-- Quit confirmation (inline, shown above progress bar) -->
@@ -232,5 +232,28 @@ function confirmQuit() {
 timerInterval = setInterval(updateTimer, 250);
 updateTimer();
 renderQuestion(0);
+
+// ── TOUCHEND BINDINGS (top bar) ───────────────────────────────────────────────
+// touchend fires at finger-lift with no browser disambiguation delay.
+// e.preventDefault() suppresses the synthesized click iOS fires after touchend.
+// Timestamp guard (600ms) prevents double-fire on non-touch / edge cases.
+(function() {
+  function bindBtn(id, fn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var lastTouch = 0;
+    el.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      lastTouch = Date.now();
+      fn();
+    }, { passive: false });
+    el.addEventListener('click', function() {
+      if (Date.now() - lastTouch < 600) return;
+      fn();
+    });
+  }
+  bindBtn('quit-btn', showQuitConfirm);
+  bindBtn('flag-btn', openFlag);
+})();
 </script>
 {% endblock %}
