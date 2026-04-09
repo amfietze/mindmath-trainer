@@ -62,12 +62,14 @@ These decisions are intentional and must not be undone without explicit instruct
 - **No database** — session stats are in-memory only (lost on session end). Flagged questions write to `flagged_questions.json` (append-only, one JSON array).
 - **Flask server-side sessions** hold all game state: current question, streaks, level modifier, stats, test questions array. No client-side persistence.
 - **Question transitions via AJAX** — no full page reloads during a session (`/next-question`, `/submit-answer`, `/end-session`, `/end-test` are all JSON endpoints).
-- **All question generation is programmatic and validated** — each generated question passes `_valid()` before use; up to 20 retries with fallback to easy difficulty.
+- **Question pre-validation**: all questions served through `get_validated_question()` in `question_engine.py` which applies a 7-point check (finite answer, display parses close to answer, no duplicate MC options, text non-empty with operator, etc.). Retries up to 50 times; falls back to Easy with a `stderr` warning if max attempts exceeded.
 - **`host="0.0.0.0"`** — app binds to all interfaces so it is reachable over local WiFi from iPhone.
 - **PWA manifest + Apple meta tags** in `base.html` for full-screen iPhone install via Add to Home Screen.
 - **European division notation** — Normal and Hard use `:` (e.g., `120 : 8`); Easy and Medium use `/`.
 - **Test questions are pre-generated deterministically** from a random seed at session start and stored in `session['test_questions']` — prevents cheating by regenerating and ensures consistent replay.
 - **Adaptive difficulty** applies only to Open Practice, not Test Mode — `level_modifier` shifts question complexity within the selected difficulty tier.
+- **Open Answer input uses a custom on-screen numpad** — digits, `.`, `/` keys arranged in a 4×3 grid. Native iPhone keyboard is never triggered in Open Answer mode. Fraction entry (e.g. `3/4`) is supported natively.
+- **Rounding tolerance is repeating-decimal-only** — `is_repeating()` uses `Fraction.limit_denominator(10000)` to detect mathematically repeating decimals. Only those get the 0.005 absolute tolerance; terminating decimals (0.375, 0.25, etc.) require exact entry.
 
 ---
 
@@ -76,11 +78,22 @@ These decisions are intentional and must not be undone without explicit instruct
 ### Open Practice
 - Infinite questions until user taps "End".
 - Per-question countdown timer: 10s / 15s / 20s / Unlimited (user-selected on home screen). Unlimited means no countdown, no auto-skip.
-- Answer format: Open Answer (free-text numeric input) or Multiple Choice (4 options, same distractor logic as Test Mode) — user-selected on home screen.
+- Answer format: Open Answer (custom numpad, no native keyboard) or Multiple Choice (4 options stacked vertically, same distractor logic as Test Mode) — user-selected on home screen.
 - Adaptive difficulty: 5 correct in a row → `level_modifier` +1 (max +5); 3 wrong in a row → `level_modifier` -1 (min -3). Modifier passed to question generator.
-- Immediate feedback overlay after each answer (correct / wrong / skipped), with special "Accepted" message for rounded-decimal matches.
+- Immediate feedback overlay after each answer (correct / wrong / skipped), with special "Accepted" message for rounded-decimal matches on repeating decimals only.
+- **Pause mode** (Open Answer only): ⏸ button in top bar freezes timer; shows a review panel with the current question and last 3 answered questions. Each history entry shows result, question text, user's answer vs correct answer, and a 🚩 flag button. Resume resumes countdown from exact frozen position. Timer at 0 when paused → auto-skip on resume. Purely client-side; no new Flask endpoints. State kept in `recentQuestions` JS array (max 3 entries, newest first).
+- Skip button always visible in bottom zone (calls same handler as timer expiry).
 - Session ends at "End" button → `/end-session` POST → redirects to `/results`.
 - Stats tracked: total, correct, wrong, skipped, total_time, by_category.
+
+### UX / Layout (game screens)
+- Game screens (`.practice-screen`, `.test-screen`): `height: 100dvh; overflow: hidden; flex column`.
+- **Top bar** — `min-height: 52px; flex-shrink: 0`. Practice: `[stat-mini] [timer] [⏸] [🚩] [End]`. Test: `[✕Quit] [Q counter] [timer] [score] [🚩]`. Flag button uses `btn-pause` class in both.
+- **Question zone** (`.middle-zone`) — `flex: 2` (40% of remaining height). Question text `clamp(1.6rem, 5vw, 2.2rem)`. Feedback overlay is `position: absolute; inset: 0` within this zone.
+- **Answer zone** (`.bottom-zone`) — `flex: 3` (60% of remaining height). Contains MC options or numpad, plus Skip button (40px fixed height).
+- MC buttons: vertical flex column (`options-grid`), each `flex: 1; min-height: 56px`. 4 buttons fill the zone proportionally.
+- Custom numpad: 4×3 `numpad-grid` (flex:1 within `numpad-wrap`), 52px actions row (⌫ + − + ✓), 48px display. The `−` key inserts `-` only as the first character (negative answers). Display shows "Your answer" placeholder when empty; font auto-shrinks from 1.8rem down to 1.0rem for long inputs.
+- Home and Results screens scroll freely (`min-height: 100dvh`, no `overflow: hidden`).
 
 ### Test Mode
 - Exactly 80 questions, fixed 8-minute global timer.
@@ -119,24 +132,24 @@ Defined in `question_engine.py` generators. `config.py` defines `TEST_DISTRIBUTI
 - **Percentages**: round percentages (10%, 20%, 25%, 50%, 75%) of round bases
 
 ### Medium *(new level between Easy and Normal)*
-- **Integers**: 2-digit operands, products up to ~200 (e.g. 17×8), 2-digit division
-- **Decimals**: 1 decimal place, includes division by simple decimals (0.5, 0.25, 2.0, 5.0)
-- **Fractions**: unit fractions + simple proper fraction × small integer (denominators 2–5)
-- **Algebra**: one-step isolation with whole number coefficients, wider operand range (x+30=55, 12x=144)
+- **Integers**: 2-digit operands, products up to ~200 (e.g. 17×8), 2-digit division; 30% chance of negative subtraction result
+- **Decimals**: 1 decimal place, includes division by simple decimals (0.5, 0.25, 2.0, 5.0); 30% chance of negative subtraction result
+- **Fractions**: unit fractions, proper fraction × integer, or fraction subtraction (same denominator, denominators 3–6; result may be negative)
+- **Algebra**: one-step isolation with whole number coefficients, wider operand range; 30% chance x is negative (e.g. x + 10 = 3)
 - **Percentages**: round percentages (10%, 20%, 25%, 50%, 75%) of 2-digit numbers (10–99)
 
 ### Normal
-- **Integers**: 2-digit × 2-digit, 3-digit addition/subtraction, 2-digit division
+- **Integers**: 2-digit × 2-digit, 3-digit addition/subtraction, 2-digit division; 30% chance of negative subtraction result
 - **Decimals**: 2 decimal places, division by 0.1/0.2/0.25/0.4/0.5/0.8, mixed decimal ×/+/−
-- **Fractions**: fraction-to-decimal conversion, fraction addition, fraction × integer
-- **Algebra**: two-step equations (ax+b=c), fraction coefficients
+- **Fractions**: fraction-to-decimal conversion, fraction addition, fraction × integer, fraction subtraction (mixed denominators; result may be negative)
+- **Algebra**: two-step equations (ax+b=c), fraction coefficients; 30% chance x is negative
 - **Percentages**: decimal percentages, reverse percentages, % increase/decrease
 
 ### Hard
 - **Integers**: 3-digit × 2-digit, multi-step chains, bracket expressions
 - **Decimals**: division by small divisors (0.03–0.15)
 - **Fractions**: mixed number addition, fraction ÷ fraction, chain operations
-- **Algebra**: bracket expansion, decimal coefficients, two-variable elimination
+- **Algebra**: bracket expansion, decimal coefficients, two-variable elimination; 30% chance x is negative
 - **Percentages**: compound %, nested %, reverse hard % problems
 
 ---
@@ -162,17 +175,26 @@ Five categories, generated in `question_engine.py`:
 
 ## Answer Validation
 
-Applies to all free-text answer endpoints (`/submit-answer` in Practice Mode).
+Applies to all free-text answer endpoints (`/submit-answer` in Practice Mode). Open Practice now uses a custom on-screen numpad — the native iPhone keyboard is never shown in this mode.
 
 ### Rules (implemented in `_check_answer()` in `app.py`)
-1. **Fraction string handling**: user input like `3/4` is parsed as `float(3)/float(4)` before comparison.
+1. **Fraction string handling**: user input like `3/4` or `-3/4` is parsed as `float(3)/float(4)` (or `float(-3)/float(4)`) before comparison. Exclusion check for operators no longer includes `-` so leading minus in fractions is accepted.
 2. **Exact match**: `abs(user - correct) / max(abs(correct), 1e-9) < 0.002` (0.2% relative tolerance). Returns `{'correct': True, 'rounded': False}`.
-3. **Rounded match**: if not exact but `abs(user - correct) <= 0.005`. Returns `{'correct': True, 'rounded': True}`.
-4. **Wrong**: everything else. Returns `{'correct': False, 'rounded': False}`.
+3. **Rounded match (repeating decimals only)**: if not exact but `abs(user - correct) <= 0.005` AND `is_repeating(correct)` is True. Returns `{'correct': True, 'rounded': True}`. Example: 1/3 ≈ 0.333, 1/6 ≈ 0.167.
+4. **Wrong**: everything else — including rounded versions of terminating decimals (e.g. 0.38 for 0.375). Returns `{'correct': False, 'rounded': False}`.
 5. **Fallback**: if float conversion fails, string comparison is used (`rounded` always False).
 
+### `is_repeating(correct_value)` — `app.py`
+Two-stage check to avoid float-noise false positives (e.g. `0.1 + 0.2 = 0.30000000000000004`):
+
+**Stage 1** — `_is_terminating_by_decimal_check(v)`: if `v × 10^n` is an integer for n = 0..4 (within 1e-6), the value is terminating → `is_repeating` returns False immediately.
+
+**Stage 2** — Fraction analysis on noise-reduced float: round to 9 significant figures, then use `Fraction.limit_denominator(100000)`. Strip all factors of 2 and 5 from denominator; if denom ≠ 1, it's repeating.
+
+Examples: `0.375 = 3/8` → stage 1 catches it (0.375 × 10³ = 375) → **terminating**. `0.333... ≈ 1/3` → stage 1 fails → stage 2: denom 3 → **repeating** (rounded answer accepted).
+
 ### Feedback for rounded match
-The `/submit-answer` response includes `"rounded": true` and `"exact_answer": "0.333333"` (6 significant decimal places, trailing zeros stripped). The practice feedback overlay shows: **"Accepted"** with sub-line **"Exact answer: 0.333333"** instead of the normal "Correct! / Answer: X".
+The `/submit-answer` response includes `"rounded": true` and `"exact_answer": "0.333333"` (6dp, trailing zeros stripped). The practice feedback overlay shows: **"Accepted"** with sub-line **"Exact answer: 0.333333"** instead of the normal "Correct! / Answer: X".
 
 ### Multiple Choice submissions (Practice MC mode)
 Client sends `mc_selected_index` and `mc_correct_index`. Server compares these integers directly, bypassing string matching. `rounded` is always `False` for MC.
@@ -235,6 +257,27 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-04-09]** — Session 4: four targeted fixes from real-device testing:
+  1. **Negative answers enabled** — `_gen_integers` (Medium/Normal subtraction: 30% chance b > a → negative result), `_gen_decimals` (Medium sub1: 30% chance negative), `_gen_fractions` (Medium + Normal: added `frac_sub` type; result may be negative), `_gen_algebra` (Medium/Normal/Hard: 30% chance x is negative). `_distractor_candidate` gains strategy 5: sign flip (`-ans_f`). `-` key added to numpad action row (allowed only as first char). `submitAnswer()` guards against lone `-`. `_check_answer()` fraction parser now accepts `-3/4` format (removed `-` from operator exclusion list).
+  2. **Answer display field** — removed "0" default; placeholder "Your answer" shown in `var(--text-dim)` when empty; background changed to `var(--bg)`; font auto-shrinks 1.8→1.6→1.4→1.2→1.0rem via JS based on input length.
+  3. **`is_repeating()` two-stage fix** — added `_is_terminating_by_decimal_check(v)` (checks `v × 10^n` is integer for n=0..4); `is_repeating()` uses this first to avoid float-noise false positives (e.g. `0.30000000000000004`); stage 2 uses `float(f"{v:.9g}")` + `limit_denominator(100000)`.
+  4. **Flag button moved to top bar** — removed fixed-position `🚩` button from both `practice.html` and `test.html`; added inline `btn-pause`-styled flag button to each top bar. Removed dead `.flag-btn` CSS.
+  5. **CLAUDE.md** updated: Difficulty Levels (negative answers), Answer Validation (two-stage check, fraction format fix), UX/Layout (numpad action row, top bar layout).
+
+- **[2026-04-09]** — Session 3: six targeted improvements from real-device testing:
+  1. **Rounding tolerance restricted to repeating decimals** — `is_repeating()` added to `app.py` using `Fraction.limit_denominator(10000)`. `_check_answer()` now only accepts rounded answers (within 0.005) when `is_repeating(correct)` is True. Terminating decimals (0.375, 0.25, etc.) require exact entry.
+  2. **Question pre-validation** — `get_validated_question()` added to `question_engine.py` with a 7-point validation check: finite answer, display parses correctly, no duplicate MC options, all options distinct, non-empty question text with operator, 6dp round stays finite. Retries up to 50× per difficulty; falls back to Easy with stderr warning. All call sites in `app.py` and `question_engine.py` updated.
+  3. **Pause mode** (Open Answer practice) — ⏸ button in top bar freezes timer at exact remaining value. Review panel shows current question + last 3 answered questions with result icons, entered vs correct answer, and per-entry 🚩 flag buttons. Resume adjusts `questionStartTime` so timer continues from freeze point. Entirely client-side.
+  4. **Custom numeric keypad replaces text input** — 4×3 grid (7–9 / 4–6 / 1–3 / . 0 /) plus ⌫ and ✓ keys. Native iPhone keyboard never appears in Open Answer mode. Fraction entry via `/` key. Input validation: no double `.`, no `.` after `/`, no `/` at start or after `.`. Removed the orphaned blue submit button that appeared beside the old text input.
+  5. **40/60 proportional layout** — `middle-zone` changed to `flex: 2` (40%), `bottom-zone` to `flex: 3` (60%). MC option buttons changed from 2×2 CSS grid to 4×1 vertical flex column (`flex: 1; min-height: 56px`). Skip button fixed at 40px height. Question text `clamp(1.6rem, 5vw, 2.2rem)`. Top bar `min-height: 52px`.
+  6. **CLAUDE.md** updated: Answer Validation, Architecture Decisions, Open Practice, new UX/Layout section.
+
+- **[2026-04-09]** — Mobile UX fixes (iPhone first-device-test findings):
+  - **iOS keyboard submission**: Open Practice answer input wrapped in `<form onsubmit="handleSubmit(event)">` so the native iOS "Go"/"Done"/tick key submits the answer. `input[type="text"]` + `inputmode="decimal"` preserved (never `type="number"`). `blur()` called on submit to dismiss keyboard before feedback overlay appears. Keydown Enter listener removed (form submit covers all cases).
+  - **Skip button**: Added explicit Skip button to Practice mode bottom zone (was previously only via timer expiry).
+  - **300ms touch delay eliminated**: `touch-action: manipulation` added to `html`, `body`, and all interactive elements globally in `style.css`. Viewport meta updated to `maximum-scale=1.0, user-scalable=no` to disable double-tap zoom detection in iOS Safari.
+  - **Single-screen layout**: Practice and Test screens now use `height: 100dvh; overflow: hidden` via `.practice-screen` / `.test-screen`. Layout split into three zones: top-bar (flex-shrink: 0), middle-zone (flex: 1, position: relative), bottom-zone (flex-shrink: 0). Feedback overlay now `position: absolute; inset: 0` within middle-zone rather than in flow. Option buttons reduced from 64px to 52px min-height. Question text uses `clamp(1.4rem, 5vw, 2rem)`.
 
 - **[2026-04-08]** — Pre-deployment hardening:
   - `runtime.txt` added, pinning Python to 3.11.9 for Render.

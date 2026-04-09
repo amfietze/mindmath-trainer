@@ -15,6 +15,7 @@ For Test Mode (multiple_choice=True):
 
 import random
 import math
+import sys
 from fractions import Fraction
 
 # Fractions with terminating decimal expansions
@@ -33,16 +34,47 @@ _CLEAN_FRACS = [
 
 # ---- public API --------------------------------------------------------------
 
-def generate_question(category, difficulty, seed=None, level_modifier=0,
-                      multiple_choice=False):
-    """Generate one validated question dict."""
-    rng = random.Random(seed) if seed is not None else random.Random()
-    return _build(category, difficulty, rng, level_modifier, multiple_choice)
+def get_validated_question(category, difficulty, level_modifier=0,
+                            multiple_choice=False, max_attempts=50, rng=None):
+    """Generate a question that passes all 7 validation checks.
+
+    Falls back to Easy difficulty after max_attempts failures, logging a
+    warning to stderr (visible in Render logs).
+    """
+    if rng is None:
+        rng = random.Random()
+
+    for _ in range(max_attempts):
+        try:
+            q = _build(category, difficulty, random.Random(rng.randint(0, 2**31)),
+                       level_modifier, multiple_choice)
+            if _validate_question(q, multiple_choice):
+                return q
+        except Exception:
+            continue
+
+    # Fallback to Easy
+    print(
+        f"WARNING: get_validated_question fallback to easy — "
+        f"category={category} difficulty={difficulty}",
+        file=sys.stderr,
+    )
+    for _ in range(max_attempts):
+        try:
+            q = _build(category, 'easy', random.Random(rng.randint(0, 2**31)),
+                       0, multiple_choice)
+            if _validate_question(q, multiple_choice):
+                return q
+        except Exception:
+            continue
+
+    # Last resort: return whatever _build gives us
+    return _build(category, 'easy', rng, 0, multiple_choice)
 
 
 def generate_test_questions(seed, difficulty, n):
     """
-    Generate n test questions deterministically from seed.
+    Generate n validated test questions deterministically from seed.
     Each question includes multiple choice options.
     Returns list of question dicts.
     """
@@ -62,9 +94,105 @@ def generate_test_questions(seed, difficulty, n):
     questions = []
     for i, cat in enumerate(cats):
         q_seed = seed * 10000 + i
-        q = _build(cat, difficulty, random.Random(q_seed), 0, True)
+        q = get_validated_question(cat, difficulty, multiple_choice=True,
+                                    rng=random.Random(q_seed))
         questions.append(q)
     return questions
+
+
+# ---- validation helpers ------------------------------------------------------
+
+def _parse_display(display_str):
+    """Parse display_answer string to float: handles ints, decimals,
+    simple fractions '3/4', and mixed numbers '2 3/4'."""
+    s = str(display_str).strip()
+    # Plain number
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    # Mixed number: "2 3/4"
+    if ' ' in s and '/' in s:
+        parts = s.split(' ', 1)
+        try:
+            whole = float(parts[0])
+            fp = parts[1].split('/')
+            frac = float(fp[0]) / float(fp[1])
+            sign = -1 if whole < 0 else 1
+            return whole + sign * abs(frac)
+        except (ValueError, ZeroDivisionError, IndexError):
+            return None
+    # Simple fraction: "3/4"
+    if '/' in s:
+        fp = s.split('/')
+        try:
+            return float(fp[0].strip()) / float(fp[1].strip())
+        except (ValueError, ZeroDivisionError, IndexError):
+            return None
+    return None
+
+
+def _validate_question(q, multiple_choice):
+    """Return True if q passes all 7 pre-serve validation checks."""
+    # Check 1 — answer is finite, non-None
+    answer = q.get('answer')
+    if answer is None:
+        return False
+    try:
+        ans_f = float(str(answer))
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(ans_f):
+        return False
+
+    # Check 7 — 6dp round is still finite (catches extreme values)
+    try:
+        if not math.isfinite(round(ans_f, 6)):
+            return False
+    except Exception:
+        return False
+
+    # Check 2 — display_answer parses to a value close to answer
+    display = q.get('display_answer', '')
+    disp_f = _parse_display(display)
+    if disp_f is not None:
+        tol = max(0.001, abs(ans_f) * 0.001)
+        if abs(disp_f - ans_f) > tol:
+            return False
+
+    # Check 5 — question text is non-empty and contains a math symbol
+    text = q.get('text', '')
+    if not text:
+        return False
+    if not any(c in text for c in ['+', '-', 'x', '/', ':', '×', '=', '%']):
+        return False
+
+    if multiple_choice:
+        options = q.get('options', [])
+        if len(options) != 4:
+            return False
+        correct_idx = q.get('correct_index')
+        if correct_idx is None or not (0 <= correct_idx < 4):
+            return False
+
+        # Parse each option to float (best effort)
+        opt_floats = []
+        for opt in options:
+            f = _parse_display(opt)
+            opt_floats.append(f)
+
+        # Check 3 — no distractor equals the correct answer within 0.001
+        for i, f in enumerate(opt_floats):
+            if i == correct_idx:
+                continue
+            if f is not None and abs(f - ans_f) < 0.001:
+                return False
+
+        # Check 4 — all 4 option strings are distinct
+        if len(set(str(o) for o in options)) != 4:
+            return False
+
+    return True
 
 
 # ---- internal builders -------------------------------------------------------
@@ -133,7 +261,10 @@ def _gen_integers(difficulty, rng, level_modifier=0):
             return _q(f'{a} + {b}', a + b)
         if op == '-':
             a = rng.randint(21, 99)
-            b = rng.randint(10, a - 1)
+            if rng.random() < 0.3:
+                b = rng.randint(a + 1, a + 30)
+            else:
+                b = rng.randint(10, a - 1)
             return _q(f'{a} - {b}', a - b)
         if op == '*':
             a = rng.randint(11, 20)
@@ -153,7 +284,10 @@ def _gen_integers(difficulty, rng, level_modifier=0):
             return _q(f'{a} + {b}', a + b)
         if kind == 'sub3':
             a = rng.randint(200, 999)
-            b = rng.randint(100, a - 1)
+            if rng.random() < 0.3:
+                b = rng.randint(a + 1, a + 200)
+            else:
+                b = rng.randint(100, a - 1)
             return _q(f'{a} - {b}', a - b)
         b = rng.randint(2, 20)
         ans = rng.randint(10, 60)
@@ -200,7 +334,10 @@ def _gen_decimals(difficulty, rng, level_modifier=0):
             return _q(f'{a} + {b}', _trunc(a + b, 1))
         if kind == 'sub1':
             a = _rand_dec1(rng, 3, 15)
-            b = _rand_dec1(rng, 1, a - 0.1)
+            if rng.random() < 0.3:
+                b = _rand_dec1(rng, a + 0.1, a + 5.0)
+            else:
+                b = _rand_dec1(rng, 1, a - 0.1)
             return _q(f'{a} - {b}', _trunc(a - b, 1))
         if kind == 'div_simple':
             b = rng.choice([0.5, 0.25, 2.0, 5.0])
@@ -244,19 +381,26 @@ def _gen_fractions(difficulty, rng, level_modifier=0):
         return _q(f'(1/{denom}) x {integer}', integer // denom)
 
     if difficulty == 'medium':
-        kind = rng.choice(['unit_frac', 'frac_mul'])
+        kind = rng.choice(['unit_frac', 'frac_mul', 'frac_sub'])
         if kind == 'unit_frac':
             denom = rng.choice([2, 3, 4, 5, 8, 10])
             integer = denom * rng.randint(1, 6)
             return _q(f'(1/{denom}) x {integer}', integer // denom)
-        d = rng.choice([2, 3, 4, 5])
-        n = rng.randint(1, d - 1)
-        integer = rng.randint(2, d * 3)
-        result = Fraction(n, d) * integer
-        return _q(f'({n}/{d}) x {integer}', _clean_frac_ans(result), _frac_str(result))
+        if kind == 'frac_mul':
+            d = rng.choice([2, 3, 4, 5])
+            n = rng.randint(1, d - 1)
+            integer = rng.randint(2, d * 3)
+            result = Fraction(n, d) * integer
+            return _q(f'({n}/{d}) x {integer}', _clean_frac_ans(result), _frac_str(result))
+        # frac_sub
+        d = rng.choice([3, 4, 5, 6])
+        n1 = rng.randint(1, d - 1)
+        n2 = rng.randint(1, d - 1)
+        result = Fraction(n1, d) - Fraction(n2, d)
+        return _q(f'{n1}/{d} - {n2}/{d}', _clean_frac_ans(result), _frac_str(result))
 
     if difficulty == 'normal':
-        kind = rng.choice(['to_dec', 'frac_add', 'frac_mul'])
+        kind = rng.choice(['to_dec', 'frac_add', 'frac_mul', 'frac_sub'])
         if kind == 'to_dec':
             n, d, dec = rng.choice(_CLEAN_FRACS)
             return _q(f'{n}/{d} as a decimal', dec)
@@ -267,12 +411,19 @@ def _gen_fractions(difficulty, rng, level_modifier=0):
             n2 = rng.randint(1, d2 - 1)
             result = Fraction(n1, d1) + Fraction(n2, d2)
             return _q(f'{n1}/{d1} + {n2}/{d2}', _clean_frac_ans(result), _frac_str(result))
-        # frac_mul
-        d1 = rng.choice([2, 3, 4, 5, 6, 8, 10])
+        if kind == 'frac_mul':
+            d1 = rng.choice([2, 3, 4, 5, 6, 8, 10])
+            n1 = rng.randint(1, d1 - 1)
+            integer = rng.randint(2, 12)
+            result = Fraction(n1, d1) * integer
+            return _q(f'({n1}/{d1}) x {integer}', _clean_frac_ans(result), _frac_str(result))
+        # frac_sub
+        d1 = rng.choice([2, 3, 4, 6, 8])
+        d2 = rng.choice([2, 3, 4, 6, 8])
         n1 = rng.randint(1, d1 - 1)
-        integer = rng.randint(2, 12)
-        result = Fraction(n1, d1) * integer
-        return _q(f'({n1}/{d1}) x {integer}', _clean_frac_ans(result), _frac_str(result))
+        n2 = rng.randint(1, d2 - 1)
+        result = Fraction(n1, d1) - Fraction(n2, d2)
+        return _q(f'{n1}/{d1} - {n2}/{d2}', _clean_frac_ans(result), _frac_str(result))
 
     # hard
     kind = rng.choice(['mixed_add', 'frac_div', 'chain'])
@@ -313,52 +464,65 @@ def _gen_algebra(difficulty, rng, level_modifier=0):
 
     if difficulty == 'medium':
         kind = rng.choice(['add', 'sub', 'mul', 'div'])
+        neg = rng.random() < 0.3
         if kind == 'add':
             a = rng.randint(5, 30)
             x = rng.randint(5, 30)
+            if neg: x = -x
             return _q(f'x + {a} = {x + a}', x)
         if kind == 'sub':
             a = rng.randint(5, 25)
             x = rng.randint(10, 40)
+            if neg: x = -x
             return _q(f'x - {a} = {x - a}', x)
         if kind == 'mul':
             a = rng.randint(2, 15)
             x = rng.randint(2, 20)
+            if neg: x = -x
             return _q(f'{a}x = {a * x}', x)
         a = rng.randint(2, 12)
         x = rng.randint(2, 20)
+        if neg: x = -x
         return _q(f'x / {a} = {x}', a * x)
 
     if difficulty == 'normal':
         kind = rng.choice(['two_step', 'frac_coeff', 'two_step_sub'])
+        neg = rng.random() < 0.3
         if kind == 'two_step':
             a, x, b = rng.randint(2, 10), rng.randint(2, 15), rng.randint(2, 20)
+            if neg: x = -x
             return _q(f'{a}x + {b} = {a * x + b}', x)
         if kind == 'frac_coeff':
             a = rng.choice([2, 4, 5, 10])
             b_choices = [v for v in [2, 4, 5, 10, 20] if v != a]
             b = rng.choice(b_choices)
             x = rng.randint(2, 10) * a
+            if neg: x = -x
             c = (x // a) * b
             return _q(f'(x/{a}) x {b} = {c}', x)
         a, x, b = rng.randint(2, 10), rng.randint(2, 15), rng.randint(2, 20)
+        if neg: x = -x
         return _q(f'{a}x - {b} = {a * x - b}', x)
 
     # hard
     kind = rng.choice(['bracket', 'dec_coeff', 'two_eq'])
+    neg = rng.random() < 0.3
     if kind == 'bracket':
         a, b = rng.randint(2, 8), rng.randint(1, 10)
         x = rng.randint(2, 15)
+        if neg: x = -x
         return _q(f'{a}(x + {b}) = {a * (x + b)}', x)
     if kind == 'dec_coeff':
         a = rng.choice([1.5, 2.5, 0.5, 1.25, 3.5])
         x = rng.randint(2, 8) * 2
+        if neg: x = -x
         b = rng.randint(1, 20)
         c = round(a * x + b, 2)
         return _q(f'{a}x + {b} = {c}', x)
     c = rng.randint(1, 5)
     a = c + rng.randint(1, 5)
     x = rng.randint(2, 15)
+    if neg: x = -x
     b = rng.randint(1, 20)
     d = a * x + b - c * x
     return _q(f'{a}x + {b} = {c}x + {d}', x)
@@ -580,7 +744,9 @@ def _numeric_distractors(answer, correct_display, rng, n=3):
 
 
 def _distractor_candidate(ans_f, rng):
-    strategy = rng.randint(0, 4)
+    strategy = rng.randint(0, 5)
+    if strategy == 5:
+        return -ans_f
     if strategy == 0:
         if abs(ans_f) >= 500:
             delta = rng.choice([-50, -20, 20, 50, -100, 100])

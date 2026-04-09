@@ -14,9 +14,10 @@
       <span id="score-val">0</span>
       <span class="score-label"> pts</span>
     </div>
+    <button id="flag-btn" class="btn-pause" onclick="openFlag()">🚩</button>
   </div>
 
-  <!-- Quit confirmation (inline) -->
+  <!-- Quit confirmation (inline, shown above progress bar) -->
   <div class="quit-confirm" id="quit-confirm" style="display:none">
     <p>Are you sure? Your progress will be lost.</p>
     <div class="quit-confirm-btns">
@@ -30,20 +31,20 @@
     <div id="progress-bar" class="progress-bar" style="width:0%"></div>
   </div>
 
-  <!-- Question card -->
-  <div class="question-card" id="question-card">
-    <div class="question-category" id="q-category"></div>
-    <div class="question-text" id="q-text"></div>
+  <!-- Middle zone: question card -->
+  <div class="middle-zone">
+    <div class="question-card" id="question-card">
+      <div class="question-category" id="q-category"></div>
+      <div class="question-text" id="q-text"></div>
+    </div>
   </div>
 
-  <!-- Multiple choice options -->
-  <div class="options-grid" id="options-grid"></div>
+  <!-- Bottom zone: MC options + skip -->
+  <div class="bottom-zone">
+    <div class="options-grid" id="options-grid"></div>
+    <button class="btn-skip" id="skip-btn" onclick="chooseAnswer(null)">Skip</button>
+  </div>
 
-  <!-- Skip button -->
-  <button class="btn-skip" id="skip-btn" onclick="chooseAnswer(null)">Skip</button>
-
-  <!-- Flag button -->
-  <button class="flag-btn" id="flag-btn" onclick="openFlag()">🚩</button>
 
 </div>
 

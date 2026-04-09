@@ -11,13 +11,14 @@ import json
 import time
 import random
 from datetime import datetime
+from fractions import Fraction
 from flask import (Flask, render_template, request, session,
                    redirect, url_for, jsonify)
 
 from config import (CATEGORIES, TEST_QUESTIONS, TEST_DURATION,
                     PRACTICE_QUESTION_TIME, PRACTICE_FEEDBACK_DELAY,
                     CORRECT_STREAK_FOR_UPGRADE, WRONG_STREAK_FOR_DOWNGRADE)
-from question_engine import generate_question, generate_test_questions
+from question_engine import get_validated_question, generate_test_questions
 from scoring import compute_practice_stats, compute_test_stats
 
 app = Flask(__name__)
@@ -311,26 +312,63 @@ def flags():
 # ─── internal helpers ─────────────────────────────────────────────────────────
 
 def _next_practice_question():
-    """Pick a category (equal distribution for now) and generate a question."""
+    """Pick a category (equal distribution) and return a validated question."""
     category = random.choice(CATEGORIES)
     difficulty = session.get('difficulty', 'normal')
     level_modifier = session.get('level_modifier', 0)
     use_mc = session.get('answer_mode', 'open') == 'mc'
-    return generate_question(category, difficulty,
-                             level_modifier=level_modifier,
-                             multiple_choice=use_mc)
+    return get_validated_question(category, difficulty,
+                                   level_modifier=level_modifier,
+                                   multiple_choice=use_mc)
+
+
+def _is_terminating_by_decimal_check(v) -> bool:
+    """True if v × 10^n is an integer for n = 0..4 (up to 4 decimal places)."""
+    try:
+        for n in range(5):
+            scaled = v * (10 ** n)
+            if abs(scaled - round(scaled)) < 1e-6:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def is_repeating(correct_value) -> bool:
+    """Return True if correct_value has a repeating (non-terminating) decimal.
+
+    Two-stage check to avoid float-noise false positives:
+    1. If v × 10^n is an integer for n = 0..4, it is terminating → return False.
+    2. Otherwise use fraction analysis on a noise-reduced float.
+    """
+    try:
+        v = float(str(correct_value))
+        if _is_terminating_by_decimal_check(v):
+            return False
+        rounded = float(f"{v:.9g}")
+        frac = Fraction(rounded).limit_denominator(100000)
+        denom = frac.denominator
+        while denom % 2 == 0:
+            denom //= 2
+        while denom % 5 == 0:
+            denom //= 5
+        return denom != 1
+    except Exception:
+        return False
 
 
 def _check_answer(user: str, correct) -> dict:
     """Returns {'correct': bool, 'rounded': bool}.
 
-    Accepts if within 0.2% relative tolerance (exact) or within 0.005
-    absolute tolerance (rounded — triggers special feedback message).
+    Exact match: within 0.2% relative tolerance.
+    Rounded match: within 0.005 absolute tolerance — ONLY for repeating
+    decimals (e.g. 1/3, 1/6). Terminating decimals (e.g. 0.375) must be
+    entered exactly; a rounded value is counted as wrong.
     Also handles fraction strings like '3/4'.
     """
     try:
         user_clean = user.strip().replace(',', '.')
-        if '/' in user_clean and not any(c in user_clean for c in ['+', '-', 'x', '*']):
+        if '/' in user_clean and not any(c in user_clean for c in ['+', 'x', '*']):
             parts = user_clean.split('/')
             if len(parts) == 2:
                 u = float(parts[0].strip()) / float(parts[1].strip())
@@ -347,9 +385,10 @@ def _check_answer(user: str, correct) -> dict:
             is_exact = diff / max(abs(c), 1e-9) < 0.002
         if is_exact:
             return {'correct': True, 'rounded': False}
-        # Rounded match: within 0.005 absolute tolerance
-        is_rounded = diff <= 0.005
-        return {'correct': is_rounded, 'rounded': is_rounded}
+        # Rounded match: only for repeating decimals
+        if is_repeating(correct) and diff <= 0.005:
+            return {'correct': True, 'rounded': True}
+        return {'correct': False, 'rounded': False}
     except (ValueError, AttributeError, ZeroDivisionError):
         exact = user.strip() == str(correct).strip()
         return {'correct': exact, 'rounded': False}

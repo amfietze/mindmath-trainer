@@ -3,14 +3,20 @@
 {% block body %}
 <div class="screen practice-screen">
 
-  <!-- Top bar -->
+  <!-- TOP BAR (52px fixed) -->
   <div class="top-bar">
     <div class="stat-mini">
       <span id="stat-correct">0</span> ✓
       <span id="stat-wrong" style="margin-left:12px">0</span> ✗
     </div>
     <div id="timer-display" class="timer">{{ question_time if question_time else '∞' }}</div>
-    <button id="end-btn" class="btn-end" onclick="endSession()">End</button>
+    <div class="top-bar-actions">
+      {% if answer_mode != 'mc' %}
+      <button id="pause-btn" class="btn-pause" onclick="togglePause()">⏸</button>
+      {% endif %}
+      <button id="flag-btn" class="btn-pause" onclick="openFlag()">🚩</button>
+      <button id="end-btn" class="btn-end" onclick="endSession()">End</button>
+    </div>
   </div>
 
   <!-- Timer bar (hidden for unlimited) -->
@@ -18,41 +24,72 @@
     <div id="timer-bar" class="timer-bar" style="width:100%"></div>
   </div>
 
-  <!-- Question card -->
-  <div class="question-card" id="question-card">
-    <div class="question-category" id="q-category">{{ question.category | capitalize }}</div>
-    <div class="question-text" id="q-text">{{ question.text }}</div>
+  <!-- QUESTION ZONE (40% of remaining height) -->
+  <div class="middle-zone">
+    <div class="question-card" id="question-card">
+      <div class="question-category" id="q-category">{{ question.category | capitalize }}</div>
+      <div class="question-text" id="q-text">{{ question.text }}</div>
+    </div>
+    <!-- Feedback overlay (absolute, covers question card) -->
+    <div class="feedback-overlay" id="feedback-overlay" style="display:none">
+      <div class="feedback-icon" id="feedback-icon"></div>
+      <div class="feedback-text" id="feedback-text"></div>
+      <div class="feedback-answer" id="feedback-answer"></div>
+      <div class="feedback-time" id="feedback-time"></div>
+    </div>
   </div>
 
-  <!-- Answer area: open answer or multiple choice -->
-  {% if answer_mode == 'mc' %}
-  <div class="options-grid" id="answer-area" style="display:none"></div>
-  {% else %}
-  <div class="answer-area" id="answer-area" style="display:none">
-    <input
-      type="text"
-      id="answer-input"
-      class="answer-input"
-      inputmode="decimal"
-      autocomplete="off"
-      autocorrect="off"
-      spellcheck="false"
-      placeholder="Your answer"
-    >
-    <button class="btn-primary btn-submit" id="submit-btn" onclick="submitAnswer()">Submit</button>
+  <!-- ANSWER ZONE (60% of remaining height) -->
+  <div class="bottom-zone" id="bottom-zone">
+    {% if answer_mode == 'mc' %}
+    <!-- Multiple choice: 4 buttons fill vertically -->
+    <div class="options-grid" id="answer-area"></div>
+    {% else %}
+    <!-- Open answer: custom numpad (no native keyboard) -->
+    <div class="numpad-display empty" id="numpad-display">Your answer</div>
+    <div class="numpad-wrap">
+      <div class="numpad-grid">
+        <button class="numpad-key" onclick="kbAppend('7')">7</button>
+        <button class="numpad-key" onclick="kbAppend('8')">8</button>
+        <button class="numpad-key" onclick="kbAppend('9')">9</button>
+        <button class="numpad-key" onclick="kbAppend('4')">4</button>
+        <button class="numpad-key" onclick="kbAppend('5')">5</button>
+        <button class="numpad-key" onclick="kbAppend('6')">6</button>
+        <button class="numpad-key" onclick="kbAppend('1')">1</button>
+        <button class="numpad-key" onclick="kbAppend('2')">2</button>
+        <button class="numpad-key" onclick="kbAppend('3')">3</button>
+        <button class="numpad-key" onclick="kbAppend('.')">.</button>
+        <button class="numpad-key" onclick="kbAppend('0')">0</button>
+        <button class="numpad-key" onclick="kbAppend('/')">/</button>
+      </div>
+      <div class="numpad-actions">
+        <button class="numpad-backspace" onclick="kbBackspace()">⌫</button>
+        <button class="numpad-minus" onclick="kbAppend('-')">−</button>
+        <button class="numpad-submit" id="numpad-submit-btn" onclick="submitAnswer()">✓</button>
+      </div>
+    </div>
+    {% endif %}
+    <button class="btn-skip" id="skip-btn" onclick="skipQuestion()">Skip</button>
+  </div>
+
+  <!-- Pause overlay (open-answer mode only; position:fixed escapes overflow:hidden) -->
+  {% if answer_mode != 'mc' %}
+  <div class="pause-overlay" id="pause-overlay" style="display:none">
+    <div class="pause-panel">
+      <div class="pause-header">
+        <span class="pause-title">⏸ Paused</span>
+        <button class="pause-resume-btn" onclick="resumeGame()">▶ Resume</button>
+      </div>
+      <div class="pause-current">
+        <strong>Current question</strong><br>
+        <span id="pause-current-q"></span>
+      </div>
+      <div class="pause-history-label">Last answered</div>
+      <div id="pause-history"></div>
+    </div>
   </div>
   {% endif %}
 
-  <!-- Feedback overlay (hidden by default) -->
-  <div class="feedback-overlay" id="feedback-overlay" style="display:none">
-    <div class="feedback-icon" id="feedback-icon"></div>
-    <div class="feedback-text" id="feedback-text"></div>
-    <div class="feedback-answer" id="feedback-answer"></div>
-    <div class="feedback-time" id="feedback-time"></div>
-  </div>
-
-  <!-- Flag button -->
-  <button class="flag-btn" id="flag-btn" onclick="openFlag()">🚩</button>
 
 </div>
 
@@ -84,6 +121,23 @@ let currentQuestion = {{ question | tojson }};
 let statsCorrect = 0;
 let statsWrong = 0;
 let awaitingNext = false;
+
+// Custom numpad state (open mode)
+let kbInput = '';
+
+// Pause state
+let isPaused = false;
+let frozenTimeLeft = null;
+
+// Recent questions history (max 3, newest first)
+let recentQuestions = [];
+let lastUserAnswer = '';
+
+// Flag modal state
+let flaggingHistorical = false;
+let historicalFlagIndex = -1;
+
+// ── TIMER ────────────────────────────────────────────────────────────────────
 
 function startTimer() {
   clearInterval(timerInterval);
@@ -123,18 +177,158 @@ function updateTimerDisplay() {
   }
 }
 
+// ── NUMPAD ───────────────────────────────────────────────────────────────────
+
+function updateNumpadDisplay() {
+  const el = document.getElementById('numpad-display');
+  if (!el) return;
+  if (!kbInput) {
+    el.textContent = 'Your answer';
+    el.className = 'numpad-display empty';
+    el.style.fontSize = '';
+    return;
+  }
+  el.textContent = kbInput;
+  el.className = 'numpad-display has-input';
+  const len = kbInput.length;
+  el.style.fontSize = len <= 6 ? '1.8rem' : len <= 8 ? '1.6rem' : len <= 10 ? '1.4rem' : len <= 11 ? '1.2rem' : '1.0rem';
+}
+
+function kbAppend(ch) {
+  if (awaitingNext || isPaused) return;
+  if (ch === '.') {
+    if (kbInput.includes('.') || kbInput.includes('/')) return;
+    kbInput += ch;
+  } else if (ch === '/') {
+    if (kbInput === '' || kbInput === '-' || kbInput.includes('/') || kbInput.includes('.')) return;
+    kbInput += ch;
+  } else if (ch === '-') {
+    if (kbInput !== '') return;  // only allowed as first character
+    kbInput = '-';
+  } else {
+    kbInput += ch;
+  }
+  if (kbInput.length > 12) kbInput = kbInput.slice(0, 12);
+  updateNumpadDisplay();
+}
+
+function kbBackspace() {
+  if (awaitingNext || isPaused) return;
+  kbInput = kbInput.slice(0, -1);
+  updateNumpadDisplay();
+}
+
+// ── PAUSE ────────────────────────────────────────────────────────────────────
+
+function togglePause() {
+  if (isPaused) {
+    resumeGame();
+  } else {
+    pauseGame();
+  }
+}
+
+function pauseGame() {
+  if (awaitingNext) return;
+  isPaused = true;
+  frozenTimeLeft = timeLeft;
+  clearInterval(timerInterval);
+
+  const btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '▶';
+
+  document.getElementById('pause-current-q').textContent = currentQuestion.text || '';
+  renderPauseHistory();
+  document.getElementById('pause-overlay').style.display = 'flex';
+}
+
+function resumeGame() {
+  isPaused = false;
+  const btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '⏸';
+
+  document.getElementById('pause-overlay').style.display = 'none';
+
+  if (!UNLIMITED) {
+    if (frozenTimeLeft !== null && frozenTimeLeft <= 0) {
+      autoSkip();
+      return;
+    }
+    // Recalculate questionStartTime so the interval picks up from frozenTimeLeft
+    timeLeft = frozenTimeLeft || 0;
+    questionStartTime = Date.now() - (QUESTION_TIME - timeLeft) * 1000;
+    timerInterval = setInterval(function() {
+      timeLeft = Math.max(0, QUESTION_TIME - (Date.now() - questionStartTime) / 1000);
+      updateTimerDisplay();
+      if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        autoSkip();
+      }
+    }, 100);
+  }
+  frozenTimeLeft = null;
+}
+
+function renderPauseHistory() {
+  const container = document.getElementById('pause-history');
+  if (!container) return;
+  if (!recentQuestions.length) {
+    container.innerHTML = '<div class="pause-empty">No questions answered yet.</div>';
+    return;
+  }
+  container.innerHTML = recentQuestions.map(function(q, i) {
+    const icon = q.result === 'correct' ? '✓' : (q.result === 'wrong' ? '✗' : '—');
+    const cls  = q.result === 'correct' ? 'correct' : (q.result === 'wrong' ? 'wrong' : 'skipped');
+    const userAns = q.user_answer || '—';
+    return '<div class="history-entry">'
+      + '<div class="history-top">'
+      + '<span class="history-icon ' + cls + '">' + icon + '</span>'
+      + '<span class="history-q">' + q.question_text + '</span>'
+      + '<button class="history-flag-btn" id="hflag-' + i + '" onclick="flagHistorical(' + i + ')">🚩</button>'
+      + '</div>'
+      + '<div class="history-answers">Your: ' + userAns + ' &nbsp;·&nbsp; Answer: ' + q.correct_answer + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function flagHistorical(i) {
+  const q = recentQuestions[i];
+  if (!q) return;
+  flaggingHistorical = true;
+  historicalFlagIndex = i;
+  document.getElementById('modal-q-text').textContent = q.question_text;
+  document.getElementById('modal-q-answer').textContent = q.correct_answer;
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
+// ── ANSWER SUBMISSION ─────────────────────────────────────────────────────────
+
 function autoSkip() {
   if (awaitingNext) return;
   awaitingNext = true;
+  lastUserAnswer = '—';
+  sendAnswer(null, true);
+}
+
+function skipQuestion() {
+  if (awaitingNext || isPaused) return;
+  clearInterval(timerInterval);
+  awaitingNext = true;
+  lastUserAnswer = '—';
   sendAnswer(null, true);
 }
 
 function submitAnswer() {
-  if (awaitingNext) return;
-  const val = document.getElementById('answer-input').value.trim();
-  if (!val) return;
+  if (awaitingNext || isPaused) return;
+  const val = kbInput.trim();
+  if (!val || val === '-') return;
   clearInterval(timerInterval);
   awaitingNext = true;
+  lastUserAnswer = val;
+  kbInput = '';
+  updateNumpadDisplay();
   const elapsed = (Date.now() - questionStartTime) / 1000;
   sendAnswer(val, false, elapsed);
 }
@@ -143,6 +337,7 @@ function submitMCAnswer(optionIndex) {
   if (awaitingNext) return;
   clearInterval(timerInterval);
   awaitingNext = true;
+  lastUserAnswer = (currentQuestion.options || [])[optionIndex] || '?';
   const elapsed = (Date.now() - questionStartTime) / 1000;
   const timeTaken = UNLIMITED ? elapsed : Math.min(elapsed, QUESTION_TIME);
   fetch('/submit-answer', {
@@ -176,6 +371,8 @@ function sendAnswer(val, skipped, elapsed) {
   .then(data => showFeedback(data, skipped))
   .catch(() => loadNext());
 }
+
+// ── FEEDBACK ──────────────────────────────────────────────────────────────────
 
 function showFeedback(data, skipped) {
   const overlay = document.getElementById('feedback-overlay');
@@ -212,11 +409,25 @@ function showFeedback(data, skipped) {
 
   timeEl.textContent = (skipped || data.result === 'skipped') ? '' : data.time_taken + 's';
 
-  document.getElementById('answer-area').style.display = 'none';
+  // Record in recent-questions history (max 3, newest first)
+  recentQuestions.unshift({
+    question_text: currentQuestion.text || '',
+    user_answer: lastUserAnswer,
+    correct_answer: data.display_answer || '',
+    result: (skipped || data.result === 'skipped') ? 'skipped' : data.result,
+    category: currentQuestion.category || '',
+  });
+  if (recentQuestions.length > 3) recentQuestions.pop();
+  lastUserAnswer = '';
+
+  // Show overlay over question zone; hide answer zone
+  document.getElementById('bottom-zone').style.display = 'none';
   overlay.style.display = 'flex';
 
   setTimeout(loadNext, FEEDBACK_DELAY);
 }
+
+// ── NEXT QUESTION ─────────────────────────────────────────────────────────────
 
 function loadNext() {
   fetch('/next-question')
@@ -235,10 +446,10 @@ function renderQuestion(q) {
     (q.category || '').charAt(0).toUpperCase() + (q.category || '').slice(1);
 
   document.getElementById('feedback-overlay').style.display = 'none';
+  document.getElementById('bottom-zone').style.display = 'flex';
 
-  const answerArea = document.getElementById('answer-area');
   if (ANSWER_MODE === 'mc') {
-    answerArea.style.display = 'grid';
+    const answerArea = document.getElementById('answer-area');
     answerArea.innerHTML = '';
     (q.options || []).forEach(function(opt, i) {
       const btn = document.createElement('button');
@@ -248,14 +459,14 @@ function renderQuestion(q) {
       answerArea.appendChild(btn);
     });
   } else {
-    answerArea.style.display = 'flex';
-    const inp = document.getElementById('answer-input');
-    inp.value = '';
-    inp.focus();
+    kbInput = '';
+    updateNumpadDisplay();
   }
 
   startTimer();
 }
+
+// ── SESSION END ───────────────────────────────────────────────────────────────
 
 function endSession() {
   clearInterval(timerInterval);
@@ -264,8 +475,11 @@ function endSession() {
     .then(data => { window.location.href = data.redirect; });
 }
 
-// Flag modal
+// ── FLAG MODAL ────────────────────────────────────────────────────────────────
+
 function openFlag() {
+  flaggingHistorical = false;
+  historicalFlagIndex = -1;
   document.getElementById('modal-q-text').textContent = currentQuestion.text || '';
   document.getElementById('modal-q-answer').textContent = currentQuestion.display_answer || '';
   document.getElementById('flag-comment').value = '';
@@ -274,11 +488,30 @@ function openFlag() {
 }
 
 function closeFlag() {
+  flaggingHistorical = false;
+  historicalFlagIndex = -1;
   document.getElementById('modal-backdrop').style.display = 'none';
   document.getElementById('flag-modal').style.display = 'none';
 }
 
 function submitFlag() {
+  let q_text, q_answer, q_category;
+
+  if (flaggingHistorical && historicalFlagIndex >= 0) {
+    const hq = recentQuestions[historicalFlagIndex];
+    if (!hq) { closeFlag(); return; }
+    q_text     = hq.question_text;
+    q_answer   = hq.correct_answer;
+    q_category = hq.category;
+    // Disable the flag button after submitting
+    const btn = document.getElementById('hflag-' + historicalFlagIndex);
+    if (btn) { btn.textContent = '✓'; btn.disabled = true; }
+  } else {
+    q_text     = currentQuestion.text || '';
+    q_answer   = currentQuestion.display_answer || '';
+    q_category = currentQuestion.category || '';
+  }
+
   const comment = document.getElementById('flag-comment').value;
   fetch('/flag', {
     method: 'POST',
@@ -286,26 +519,19 @@ function submitFlag() {
     body: JSON.stringify({
       game_mode: MODE,
       difficulty: DIFFICULTY,
-      question_text: currentQuestion.text,
-      correct_answer: currentQuestion.display_answer,
-      category: currentQuestion.category,
+      question_text: q_text,
+      correct_answer: q_answer,
+      category: q_category,
       user_comment: comment
     })
   }).then(() => closeFlag());
 }
 
-// Submit on Enter (open answer mode only)
-if (ANSWER_MODE !== 'mc') {
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') submitAnswer();
-  });
-}
+// ── BOOT ──────────────────────────────────────────────────────────────────────
 
-// Boot: show initial question
 (function() {
-  const answerArea = document.getElementById('answer-area');
   if (ANSWER_MODE === 'mc') {
-    answerArea.style.display = 'grid';
+    const answerArea = document.getElementById('answer-area');
     (currentQuestion.options || []).forEach(function(opt, i) {
       const btn = document.createElement('button');
       btn.className = 'option-btn';
@@ -314,8 +540,7 @@ if (ANSWER_MODE !== 'mc') {
       answerArea.appendChild(btn);
     });
   } else {
-    answerArea.style.display = 'flex';
-    document.getElementById('answer-input').focus();
+    updateNumpadDisplay();
   }
   startTimer();
 })();
