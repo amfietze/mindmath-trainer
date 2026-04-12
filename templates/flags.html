@@ -20,7 +20,9 @@
         <span class="badge diff-{{ f.difficulty }}">{{ f.difficulty | capitalize }}</span>
         <span class="badge cat">{{ f.category | capitalize }}</span>
         <span class="flag-ts">{{ f.timestamp }}</span>
-        <button class="flag-delete-btn" onclick="askDeleteFlag({{ loop.index0 }})">✕ Delete</button>
+        <button class="flag-delete-btn"
+          ontouchend="_flagTap(event, askDeleteFlag, {{ loop.index0 }})"
+          onclick="_flagTap(event, askDeleteFlag, {{ loop.index0 }})">✕ Delete</button>
       </div>
       <div class="flag-question">{{ f.question_text }}</div>
       <div class="flag-answer">Answer: <strong>{{ f.correct_answer }}</strong></div>
@@ -30,8 +32,12 @@
       <div class="flag-delete-confirm" id="delete-confirm-{{ loop.index0 }}" style="display:none">
         <span>Delete this flag?</span>
         <div class="flag-delete-confirm-btns">
-          <button class="flag-delete-yes" onclick="confirmDeleteFlag({{ loop.index0 }})">Yes</button>
-          <button class="flag-delete-cancel" onclick="cancelDeleteFlag({{ loop.index0 }})">Cancel</button>
+          <button class="flag-delete-yes"
+            ontouchend="_flagTap(event, confirmDeleteFlag, {{ loop.index0 }})"
+            onclick="_flagTap(event, confirmDeleteFlag, {{ loop.index0 }})">Yes</button>
+          <button class="flag-delete-cancel"
+            ontouchend="_flagTap(event, cancelDeleteFlag, {{ loop.index0 }})"
+            onclick="_flagTap(event, cancelDeleteFlag, {{ loop.index0 }})">Cancel</button>
         </div>
       </div>
     </div>
@@ -43,6 +49,19 @@
 
 <script>
 var totalFlags = {{ flags | length }};
+
+// Unified touch/click handler — touchend fires first and sets _lt timestamp;
+// the subsequent synthesized click is suppressed by checking that timestamp.
+function _flagTap(e, fn, idx) {
+  if (e.type === 'touchend') {
+    e.preventDefault();
+    e.currentTarget._lt = Date.now();
+    fn(idx);
+  } else {
+    if (Date.now() - (e.currentTarget._lt || 0) < 600) return;
+    fn(idx);
+  }
+}
 
 function askDeleteFlag(idx) {
   document.getElementById('delete-confirm-' + idx).style.display = 'flex';
@@ -68,7 +87,6 @@ function confirmDeleteFlag(idx) {
         setTimeout(function() {
           card.style.display = 'none';
           totalFlags--;
-          // Update count display
           var countEl = document.getElementById('flag-count');
           if (countEl) {
             if (totalFlags <= 0) {
@@ -87,7 +105,6 @@ function confirmDeleteFlag(idx) {
               countEl.textContent = totalFlags + ' flag' + (totalFlags !== 1 ? 's' : '');
             }
           }
-          // Re-index remaining cards
           reindexCards();
         }, 210);
       }
@@ -100,21 +117,30 @@ function confirmDeleteFlag(idx) {
 }
 
 function reindexCards() {
-  // After deletion, update data-flag-index and id attributes for remaining visible cards
   var cards = document.querySelectorAll('.flag-card:not([style*="display: none"])');
   var newIdx = 0;
   cards.forEach(function(card) {
-    var oldIdx = parseInt(card.getAttribute('data-flag-index'));
-    // Update onclick handlers for this card's delete button
     var deleteBtn = card.querySelector('.flag-delete-btn');
     var confirmDiv = card.querySelector('.flag-delete-confirm');
     var yesBtn = card.querySelector('.flag-delete-yes');
     var cancelBtn = card.querySelector('.flag-delete-cancel');
 
-    if (deleteBtn) deleteBtn.setAttribute('onclick', 'askDeleteFlag(' + newIdx + ')');
+    var tpl_te = '_flagTap(event, {fn}, ' + newIdx + ')';
+    var tpl_cl = '_flagTap(event, {fn}, ' + newIdx + ')';
+
+    if (deleteBtn) {
+      deleteBtn.setAttribute('ontouchend', '_flagTap(event, askDeleteFlag, ' + newIdx + ')');
+      deleteBtn.setAttribute('onclick', '_flagTap(event, askDeleteFlag, ' + newIdx + ')');
+    }
     if (confirmDiv) confirmDiv.id = 'delete-confirm-' + newIdx;
-    if (yesBtn) yesBtn.setAttribute('onclick', 'confirmDeleteFlag(' + newIdx + ')');
-    if (cancelBtn) cancelBtn.setAttribute('onclick', 'cancelDeleteFlag(' + newIdx + ')');
+    if (yesBtn) {
+      yesBtn.setAttribute('ontouchend', '_flagTap(event, confirmDeleteFlag, ' + newIdx + ')');
+      yesBtn.setAttribute('onclick', '_flagTap(event, confirmDeleteFlag, ' + newIdx + ')');
+    }
+    if (cancelBtn) {
+      cancelBtn.setAttribute('ontouchend', '_flagTap(event, cancelDeleteFlag, ' + newIdx + ')');
+      cancelBtn.setAttribute('onclick', '_flagTap(event, cancelDeleteFlag, ' + newIdx + ')');
+    }
     card.id = 'flag-card-' + newIdx;
     card.setAttribute('data-flag-index', newIdx);
     newIdx++;

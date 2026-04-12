@@ -35,4 +35,14 @@
     <a href="/flags" class="link-dim">Review flagged questions →</a>
   </footer>
 </div>
+
+<script>
+// Game tile links: navigate on touchend to eliminate 300ms anchor tap delay
+document.querySelectorAll('.game-tile').forEach(function(tile) {
+  tile.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    window.location.href = this.href;
+  }, { passive: false });
+});
+</script>
 {% endblock %}

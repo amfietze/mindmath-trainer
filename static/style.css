@@ -36,10 +36,14 @@ html, body {
 }
 
 /* Interactive elements: ensure cursor, no text selection, tap highlight suppressed */
+a, button, [role="button"],
+input[type="submit"], input[type="button"], input[type="radio"], input[type="checkbox"],
 .btn, .btn-skip, .btn-pause, .btn-end, .btn-primary, .btn-secondary,
 .numpad-key, .numpad-backspace, .numpad-submit, .numpad-minus,
 .option-btn, .quit-btn, .seg-btn, .mode-btn, .diff-btn,
-.letter-key, .game-tile {
+.letter-key, .game-tile, .modal-backdrop,
+.flag-delete-btn, .flag-delete-yes, .flag-delete-cancel,
+.btn-quit-confirm, .back-link, .link-dim {
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;

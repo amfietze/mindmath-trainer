@@ -22,8 +22,8 @@
   <div class="quit-confirm" id="quit-confirm" style="display:none">
     <p>Are you sure? Your progress will be lost.</p>
     <div class="quit-confirm-btns">
-      <button class="btn-secondary" onclick="hideQuitConfirm()">Cancel</button>
-      <button class="btn-quit-confirm" onclick="confirmQuit()">Yes, quit</button>
+      <button class="btn-secondary" ontouchend="_tap(event, hideQuitConfirm)" onclick="_tap(event, hideQuitConfirm)">Cancel</button>
+      <button class="btn-quit-confirm" ontouchend="_tap(event, confirmQuit)" onclick="_tap(event, confirmQuit)">Yes, quit</button>
     </div>
   </div>
 
@@ -58,15 +58,15 @@
 </div>
 
 <!-- Flag modal -->
-<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" ontouchend="_tap(event, closeFlag)" onclick="_tap(event, closeFlag)"></div>
 <div class="modal" id="flag-modal" style="display:none">
   <h3>Flag this question</h3>
   <div class="modal-question" id="modal-q-text"></div>
   <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
   <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
   <div class="modal-btns">
-    <button class="btn-secondary" onclick="closeFlag()">Cancel</button>
-    <button class="btn-primary" onclick="submitFlag()">Submit Flag</button>
+    <button class="btn-secondary" ontouchend="_tap(event, closeFlag)" onclick="_tap(event, closeFlag)">Cancel</button>
+    <button class="btn-primary" ontouchend="_tap(event, submitFlag)" onclick="_tap(event, submitFlag)">Submit Flag</button>
   </div>
 </div>
 
@@ -74,6 +74,18 @@
 const TEST_DURATION = {{ test_duration }};
 const SERVER_START = {{ start_time }};
 const DIFFICULTY = "{{ difficulty }}";
+
+// Unified touch/click guard for modal/confirm buttons
+function _tap(e, fn) {
+  if (e.type === 'touchend') {
+    e.preventDefault();
+    e.currentTarget._lt = Date.now();
+    fn();
+  } else {
+    if (Date.now() - (e.currentTarget._lt || 0) < 600) return;
+    fn();
+  }
+}
 
 let currentQuestion = {{ question | tojson }};
 let timerInterval = null;

@@ -4,21 +4,34 @@
 <div class="screen home-screen">
   <header class="home-header">
     <a href="/" class="back-link">← Back</a>
-    <div class="logo">…</div>
     <h1>Sequences</h1>
     <p class="subtitle">Number &amp; Letter Patterns</p>
   </header>
 
   <form method="POST" action="/sequences/start" id="seqForm">
-    <!-- Mode selector -->
-    <div class="seq-mode-selector">
-      <button type="button" class="seq-mode-btn active" id="mode-practice-btn" onclick="setSeqMode('practice')">Practice</button>
-      <button type="button" class="seq-mode-btn" id="mode-test-btn" onclick="setSeqMode('test')">Test</button>
-    </div>
-    <input type="hidden" name="mode" id="mode-input" value="practice">
-    <p class="seq-mode-note" id="test-note" style="display:none">8 minutes · Multiple choice · +1 / −1 scoring</p>
 
-    <!-- Difficulty selection -->
+    <!-- Mode selection (card style, matching arithmetic.html) -->
+    <section class="card">
+      <h2>Mode</h2>
+      <div class="btn-group" role="group">
+        <label class="mode-btn selected" id="label-seq-practice">
+          <input type="radio" name="mode" value="practice" checked>
+          <span>
+            <strong>Practice</strong>
+            <small>Continuous · Open-ended</small>
+          </span>
+        </label>
+        <label class="mode-btn" id="label-seq-test">
+          <input type="radio" name="mode" value="test">
+          <span>
+            <strong>Test Mode</strong>
+            <small>8 minutes · Multiple choice · +1 / −1</small>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Difficulty selection (2×2 grid) -->
     <section class="card">
       <h2>Difficulty</h2>
       <div class="diff-grid" role="group">
@@ -53,8 +66,8 @@
       </div>
     </section>
 
-    <!-- Answer format -->
-    <section class="card settings-card">
+    <!-- Answer format (hidden in test mode) -->
+    <section class="card settings-card" id="seq-settings-section">
       <h2>Settings</h2>
       <div class="setting-row">
         <span class="setting-label">Answer format</span>
@@ -78,6 +91,7 @@
 </div>
 
 <script>
+  // Highlight selected radio button groups + handle mode→settings toggle
   document.querySelectorAll('input[type="radio"]').forEach(function(radio) {
     radio.addEventListener('change', function() {
       var name = this.getAttribute('name');
@@ -85,40 +99,29 @@
         r.closest('label').classList.remove('selected');
       });
       this.closest('label').classList.add('selected');
+      if (name === 'mode') {
+        _updateSeqSettingsForMode(this.value);
+      }
     });
     if (radio.checked) radio.closest('label').classList.add('selected');
   });
 
-  function setSeqMode(mode) {
-    document.getElementById('mode-input').value = mode;
-    var practiceBtn = document.getElementById('mode-practice-btn');
-    var testBtn = document.getElementById('mode-test-btn');
-    var answerRow = document.getElementById('answer-mode-row');
-    var testNote = document.getElementById('test-note');
-    if (mode === 'test') {
-      testBtn.classList.add('active');
-      practiceBtn.classList.remove('active');
-      if (answerRow) answerRow.style.display = 'none';
-      testNote.style.display = 'block';
-    } else {
-      practiceBtn.classList.add('active');
-      testBtn.classList.remove('active');
-      if (answerRow) answerRow.style.display = '';
-      testNote.style.display = 'none';
+  function _updateSeqSettingsForMode(mode) {
+    var isTest = mode === 'test';
+    var settingsSection = document.getElementById('seq-settings-section');
+    var amInputs = document.querySelectorAll('input[name="answer_mode"]');
+    if (settingsSection) {
+      if (isTest) {
+        settingsSection.classList.add('disabled-row');
+        amInputs.forEach(function(i) { i.disabled = true; });
+      } else {
+        settingsSection.classList.remove('disabled-row');
+        amInputs.forEach(function(i) { i.disabled = false; });
+      }
     }
   }
 
-  // Give the answer format row an id so we can hide it in test mode
-  (function() {
-    var rows = document.querySelectorAll('.setting-row');
-    rows.forEach(function(row) {
-      var label = row.querySelector('.setting-label');
-      if (label && label.textContent.trim() === 'Answer format') {
-        row.id = 'answer-mode-row';
-      }
-    });
-  })();
-
+  // Start button: touchend at finger-lift, timestamp guard prevents double-fire
   (function() {
     var btn = document.getElementById('start-btn');
     var lastTouch = 0;
