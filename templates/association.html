@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}Word Associations – MindMath{% endblock %}
+{% block body %}
+<div class="screen seq-screen">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div class="stat-mini">
+      <span id="stat-correct">{{ stats.correct }}</span> ✓
+      <span id="stat-wrong" style="margin-left:12px">{{ stats.wrong }}</span> ✗
+    </div>
+    <div class="seq-q-counter" id="q-counter">
+      Q {{ stats.total + 1 }}
+      <span style="margin-left:6px;font-size:13px">{{ '🇬🇧' if language == 'en' else '🇩🇪' }}</span>
+    </div>
+    <div class="top-bar-actions">
+      <button id="flag-btn" class="btn-pause">🚩</button>
+      <button id="end-btn" class="btn-end">End</button>
+    </div>
+  </div>
+
+  <!-- QUESTION ZONE -->
+  <div class="middle-zone">
+    <div class="question-card" id="question-card">
+      <!-- Analogy display -->
+      <div class="assoc-analogy" id="assoc-analogy">
+        <div class="assoc-reference-pair" id="ref-pair">
+          <span class="assoc-word" id="prompt-a1">{{ question.prompt_a1 }}</span>
+          <span class="assoc-separator">:</span>
+          <span class="assoc-word" id="prompt-a2">{{ question.prompt_a2 }}</span>
+        </div>
+        <div class="assoc-arrow">→</div>
+        <div class="assoc-target-pair" id="target-pair">
+          <span class="assoc-word-bold" id="prompt-b1">{{ question.prompt_b1 }}</span>
+          <span class="assoc-separator">:</span>
+          <span class="assoc-blank" id="assoc-blank">___?___</span>
+        </div>
+      </div>
+      <div class="question-category" id="category-label">
+        {{ question.category.replace('_', ' ').upper() }}
+      </div>
+    </div>
+    <!-- Feedback overlay -->
+    <div class="feedback-overlay" id="feedback-overlay" style="display:none">
+      <div class="feedback-icon" id="feedback-icon"></div>
+      <div class="feedback-text" id="feedback-text"></div>
+      <div class="feedback-answer" id="feedback-answer"></div>
+    </div>
+  </div>
+
+  <!-- ANSWER ZONE -->
+  <div class="bottom-zone" id="bottom-zone">
+    <div class="options-grid" id="mc-zone"></div>
+    <button class="btn-skip" id="skip-btn" ontouchstart="assocSkipTap(event)" onclick="assocSkip()">Skip</button>
+  </div>
+
+</div>
+
+<!-- Flag modal -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
+<div class="modal" id="flag-modal" style="display:none">
+  <h3>Flag this question</h3>
+  <div class="modal-question" id="modal-q-text"></div>
+  <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
+  <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
+  <div class="modal-btns">
+    <button class="btn-secondary" ontouchend="_tap(event, closeFlag)" onclick="_tap(event, closeFlag)">Cancel</button>
+    <button class="btn-primary" ontouchend="_tap(event, submitFlag)" onclick="_tap(event, submitFlag)">Submit Flag</button>
+  </div>
+</div>
+
+<script>
+const LANGUAGE = "{{ language }}";
+
+let currentQ = {{ question | tojson }};
+let statsCorrect = {{ stats.correct }};
+let statsWrong = {{ stats.wrong }};
+let statsTotal = {{ stats.total }};
+let awaitingNext = false;
+let questionStartTime = Date.now();
+
+// ── Render helpers ─────────────────────────────────────────────────────────────
+function renderQuestion(q) {
+  document.getElementById('prompt-a1').textContent = q.prompt_a1;
+  document.getElementById('prompt-a2').textContent = q.prompt_a2;
+  document.getElementById('prompt-b1').textContent = q.prompt_b1;
+  document.getElementById('assoc-blank').textContent = '___?___';
+  document.getElementById('category-label').textContent =
+    (q.category || '').replace(/_/g, ' ').toUpperCase();
+  statsTotal++;
+  document.getElementById('q-counter').innerHTML =
+    'Q ' + statsTotal +
+    '<span style="margin-left:6px;font-size:13px">' +
+    (LANGUAGE === 'en' ? '🇬🇧' : '🇩🇪') + '</span>';
+}
+
+function renderOptions(q) {
+  const zone = document.getElementById('mc-zone');
+  zone.innerHTML = '';
+  (q.options || []).forEach(function(opt, i) {
+    const btn = document.createElement('button');
+    btn.className = 'option-btn';
+    btn.textContent = opt;
+    btn.addEventListener('touchstart', function(e) { e.preventDefault(); submitMC(i, opt); }, { passive: false });
+    btn.onclick = function() { submitMC(i, opt); };
+    zone.appendChild(btn);
+  });
+  document.getElementById('bottom-zone').style.display = 'flex';
+}
+
+// ── MC submit ──────────────────────────────────────────────────────────────────
+function submitMC(optionIndex, optionText) {
+  if (awaitingNext) return;
+  awaitingNext = true;
+  const elapsed = (Date.now() - questionStartTime) / 1000;
+
+  fetch('/associations/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user_answer: optionText,
+      time_taken: elapsed,
+      skipped: false,
+    })
+  })
+  .then(r => r.json())
+  .then(data => showFeedback(data))
+  .catch(() => loadNext());
+}
+
+// ── Skip ───────────────────────────────────────────────────────────────────────
+function assocSkipTap(e) { if (e && e.type === 'touchstart') e.preventDefault(); assocSkip(); }
+
+function assocSkip() {
+  if (awaitingNext) return;
+  awaitingNext = true;
+  const elapsed = (Date.now() - questionStartTime) / 1000;
+  fetch('/associations/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_answer: '', time_taken: elapsed, skipped: true })
+  })
+  .then(r => r.json())
+  .then(data => showFeedback(data))
+  .catch(() => loadNext());
+}
+
+// ── Feedback ───────────────────────────────────────────────────────────────────
+function showFeedback(data) {
+  const overlay = document.getElementById('feedback-overlay');
+  const icon    = document.getElementById('feedback-icon');
+  const text    = document.getElementById('feedback-text');
+  const ans     = document.getElementById('feedback-answer');
+
+  if (data.result === 'skipped') {
+    icon.textContent = '\u23ed';
+    icon.className = 'feedback-icon skipped';
+    text.textContent = 'Skipped';
+    ans.textContent = 'Answer: ' + data.correct_answer;
+  } else if (data.result === 'correct') {
+    icon.textContent = '\u2713';
+    icon.className = 'feedback-icon correct';
+    text.textContent = 'Correct!';
+    ans.textContent = 'Answer: ' + data.correct_answer;
+    statsCorrect++;
+    document.getElementById('stat-correct').textContent = statsCorrect;
+  } else {
+    icon.textContent = '\u2717';
+    icon.className = 'feedback-icon wrong';
+    text.textContent = 'Wrong';
+    ans.textContent = 'Answer: ' + data.correct_answer;
+    statsWrong++;
+    document.getElementById('stat-wrong').textContent = statsWrong;
+  }
+
+  document.getElementById('bottom-zone').style.display = 'none';
+  overlay.style.display = 'flex';
+  setTimeout(loadNext, 1200);
+}
+
+// ── Load next question ─────────────────────────────────────────────────────────
+function loadNext() {
+  fetch('/associations/next', { method: 'POST' })
+    .then(r => r.json())
+    .then(q => {
+      awaitingNext = false;
+      currentQ = q;
+      document.getElementById('feedback-overlay').style.display = 'none';
+      renderQuestion(q);
+      renderOptions(q);
+      questionStartTime = Date.now();
+    })
+    .catch(function() { awaitingNext = false; });
+}
+
+// ── End session ────────────────────────────────────────────────────────────────
+function endGame() {
+  fetch('/associations/end', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => { window.location.href = data.redirect; });
+}
+
+// ── Flag modal ─────────────────────────────────────────────────────────────────
+function openFlag() {
+  const q = currentQ;
+  const qStr = (q.prompt_a1 || '') + ' : ' + (q.prompt_a2 || '') +
+               ' → ' + (q.prompt_b1 || '') + ' : ___?';
+  document.getElementById('modal-q-text').textContent = qStr;
+  document.getElementById('modal-q-answer').textContent = q.answer || '';
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
+function closeFlag() {
+  document.getElementById('modal-backdrop').style.display = 'none';
+  document.getElementById('flag-modal').style.display = 'none';
+}
+
+function submitFlag() {
+  const q = currentQ;
+  const qStr = (q.prompt_a1 || '') + ' : ' + (q.prompt_a2 || '') +
+               ' → ' + (q.prompt_b1 || '') + ' : ___?';
+  const comment = document.getElementById('flag-comment').value;
+  fetch('/flag', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      game_mode: 'associations',
+      difficulty: LANGUAGE,
+      question_text: qStr,
+      correct_answer: q.answer || '',
+      category: q.category || '',
+      user_comment: comment,
+    })
+  }).then(() => closeFlag());
+}
+
+// _tap helper for modal buttons (prevents double-fire on iOS)
+function _tap(e, fn) {
+  if (e.type === 'touchend') {
+    e.preventDefault();
+    e.currentTarget._lt = Date.now();
+    fn();
+  } else if (e.type === 'click') {
+    if (e.currentTarget._lt && Date.now() - e.currentTarget._lt < 600) return;
+    fn();
+  }
+}
+
+// ── Touchend bindings for top-bar buttons ─────────────────────────────────────
+(function() {
+  function bindBtn(id, fn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var lastTouch = 0;
+    el.addEventListener('touchend', function(e) {
+      e.preventDefault(); lastTouch = Date.now(); fn();
+    }, { passive: false });
+    el.addEventListener('click', function() {
+      if (Date.now() - lastTouch < 600) return; fn();
+    });
+  }
+  bindBtn('flag-btn', openFlag);
+  bindBtn('end-btn', endGame);
+})();
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+(function() {
+  renderOptions(currentQ);
+  questionStartTime = Date.now();
+})();
+</script>
+{% endblock %}

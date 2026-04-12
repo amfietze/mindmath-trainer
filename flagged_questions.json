@@ -7,14 +7,5 @@
     "correct_answer": "4",
     "category": "integers",
     "user_comment": "test flag"
-  },
-  {
-    "timestamp": "2026-04-09T12:09:13Z",
-    "game_mode": "practice",
-    "difficulty": "normal",
-    "question_text": "446 decreased by 10% =",
-    "correct_answer": "401",
-    "category": "percentages",
-    "user_comment": "no rounding should be allowed here. correct answer: 401.4\n"
   }
 ]

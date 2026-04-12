@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Word Associations – MindMath{% endblock %}
+{% block body %}
+<div class="screen home-screen">
+  <header class="home-header">
+    <a href="/" class="back-link">← Back</a>
+    <h1>Word Associations</h1>
+    <p class="subtitle">Verbal Analogies</p>
+  </header>
+
+  <form method="POST" action="/associations/start" id="assocForm">
+    <input type="hidden" name="language" id="language-input" value="en">
+
+    <!-- Language selector -->
+    <section class="card">
+      <h2>Language</h2>
+      <div class="lang-selector">
+        <button type="button" class="lang-btn active" id="lang-en" data-lang="en">🇬🇧 English</button>
+        <button type="button" class="lang-btn" id="lang-de" data-lang="de">🇩🇪 Deutsch</button>
+      </div>
+    </section>
+
+    <!-- Mode info card (non-interactive, always selected appearance) -->
+    <section class="card">
+      <h2>Mode</h2>
+      <div class="btn-group">
+        <div class="mode-btn selected" style="pointer-events:none">
+          <span>
+            <strong>Practice</strong>
+            <small>Unlimited questions · Multiple choice</small>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <button type="button" class="btn-primary btn-start" id="start-btn">Start</button>
+  </form>
+
+  <footer class="home-footer">
+    <a href="/flags" class="link-dim">Review flagged questions →</a>
+  </footer>
+</div>
+
+<script>
+  // Language toggle
+  var langBtns = document.querySelectorAll('.lang-btn');
+  var langInput = document.getElementById('language-input');
+
+  langBtns.forEach(function(btn) {
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      _selectLang(this.dataset.lang);
+    }, { passive: false });
+    btn.addEventListener('click', function() {
+      _selectLang(this.dataset.lang);
+    });
+  });
+
+  function _selectLang(lang) {
+    langBtns.forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById('lang-' + lang).classList.add('active');
+    langInput.value = lang;
+  }
+
+  // Start button: touchend at finger-lift, timestamp guard prevents double-fire
+  (function() {
+    var btn = document.getElementById('start-btn');
+    var lastTouch = 0;
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      lastTouch = Date.now();
+      document.getElementById('assocForm').submit();
+    }, { passive: false });
+    btn.addEventListener('click', function() {
+      if (Date.now() - lastTouch < 600) return;
+      document.getElementById('assocForm').submit();
+    });
+  })();
+</script>
+{% endblock %}

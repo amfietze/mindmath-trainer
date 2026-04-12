@@ -43,7 +43,8 @@ input[type="submit"], input[type="button"], input[type="radio"], input[type="che
 .option-btn, .quit-btn, .seg-btn, .mode-btn, .diff-btn,
 .letter-key, .game-tile, .modal-backdrop,
 .flag-delete-btn, .flag-delete-yes, .flag-delete-cancel,
-.btn-quit-confirm, .back-link, .link-dim {
+.btn-quit-confirm, .back-link, .link-dim,
+.lang-btn {
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -1287,3 +1288,108 @@ a { color: var(--accent); text-decoration: none; }
 .test-score-pts.positive { color: var(--correct); }
 .test-score-pts.negative { color: var(--wrong); }
 .test-score-unit { font-size: 20px; color: var(--text-dim); font-weight: 600; }
+
+/* ── WORD ASSOCIATIONS GAME ─────────────────────────────────────────────── */
+
+/* Language selector (two-button toggle) */
+.lang-selector {
+  display: flex;
+  gap: 8px;
+}
+.lang-btn {
+  flex: 1;
+  background: var(--surface2);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color .15s, background .15s, color .15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  min-height: 52px;
+}
+.lang-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.lang-btn:active { opacity: .85; }
+
+/* Analogy display container */
+.assoc-analogy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+/* Reference pair (A1 : A2) — muted, already known */
+.assoc-reference-pair {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: clamp(1.2rem, 3.5vw, 1.5rem);
+  font-weight: 600;
+}
+
+/* Arrow between reference and target pair */
+.assoc-arrow {
+  font-size: 1.2rem;
+  color: var(--text-dim);
+  line-height: 1;
+}
+
+/* Target pair (B1 : ___?) — prominent */
+.assoc-target-pair {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(1.4rem, 4vw, 1.8rem);
+  font-weight: 700;
+}
+
+/* Words in reference pair */
+.assoc-word {
+  color: var(--text-dim);
+}
+
+/* First word in target pair */
+.assoc-word-bold {
+  color: var(--text);
+  font-weight: 800;
+}
+
+/* The ":" separators */
+.assoc-separator {
+  color: var(--accent);
+  font-weight: 900;
+}
+
+/* The "___?___" blank */
+.assoc-blank {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+
+/* Question log: analogy display in results */
+.assoc-log-analogy {
+  font-size: 14px;
+  line-height: 1.4;
+}
+.assoc-log-muted {
+  color: var(--text-dim);
+}
+.assoc-log-arrow {
+  color: var(--text-dim);
+}

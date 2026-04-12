@@ -8,9 +8,10 @@ Read this file at the start of every session before making any changes. It provi
 
 MindMath Trainer is a Flask-based multi-game PWA designed to run on an iPhone (Safari → Add to Home Screen). It is served locally from a Windows machine on the home network (host `0.0.0.0`, port 5000) and is also deployable to cloud platforms (Render, Railway) via a Procfile.
 
-The app currently has two games, accessible from a game-launcher home screen at `/`:
+The app currently has three games, accessible from a game-launcher home screen at `/`:
 - **Mental Arithmetic** — Optiver-style arithmetic training with Open Practice (adaptive, untimed) and Test Mode (80 questions, 8 min, MC). Five question categories across 4 difficulty levels.
 - **Sequences** — Number and letter pattern sequences across four difficulty levels. Practice Mode (adaptive) and Test Mode (8 min, MC, +1/−1 scoring). Supports Multiple Choice and Open Answer (numpad for numbers, A–Z keyboard for letters).
+- **Word Associations** — Verbal analogy questions ("Crown : Tree → Head : ___?"). Practice Mode only, Multiple Choice (4 options). Questions sourced from a hardcoded curated JSON bank. Supports English and German (language selected on settings page). 10 analogy categories, 150+ questions per language.
 
 ---
 
@@ -37,12 +38,16 @@ mental-math-trainer/
 ├── config.py               Constants: difficulty params, timing, scoring thresholds, TEST_DISTRIBUTION
 ├── question_engine.py      Arithmetic question generation: 5 categories × 4 difficulties, MC attachment
 ├── sequence_engine.py      Sequence generation: 4 difficulties, number + letter types, MC distractor attachment
+├── association_engine.py   Bank loader, question server, answer checker, module-level language cache
 ├── scoring.py              Post-session stats computation for arithmetic modes
 ├── requirements.txt        Flask, gunicorn
 ├── Procfile                web: gunicorn app:app
 ├── CLAUDE.md               This file — architecture reference
 ├── flagged_questions.json  Append-only list of user-flagged questions (excluded from git)
 ├── .gitignore              Excludes venv, __pycache__, .env, flagged_questions.json
+├── data/
+│   ├── associations_en.json  EN question bank (150 verbal analogy questions, 10 categories)
+│   └── associations_de.json  DE question bank (same structure, 150 German questions)
 ├── static/
 │   ├── app.js              Minimal shared JS (prevents double-tap zoom on iOS)
 │   ├── style.css           Complete styling; CSS variables; responsive dark theme
@@ -60,6 +65,9 @@ mental-math-trainer/
     ├── sequence.html           Sequences practice game screen (/sequences/play) — term boxes, numpad or A-Z keyboard
     ├── sequence_test.html      Sequences test mode screen (/sequences/test) — MC, global timer, +1/−1 scoring
     ├── sequence_results.html   Sequences results: practice stats / test score + performance band, question log with rule
+    ├── association_home.html   Word Associations settings page (/associations) — language selector (EN/DE)
+    ├── association.html        Word Associations game screen (/associations/play) — analogy display + MC options
+    ├── association_results.html Word Associations results: stats, category breakdown, question log with relationship
     └── flags.html              Flagged questions viewer (/flags) — with per-card delete (fade-out, no reload)
 ```
 
@@ -85,6 +93,10 @@ These decisions are intentional and must not be undone without explicit instruct
 - **Rounding tolerance is repeating-decimal-only** — `is_repeating()` uses `Fraction.limit_denominator(10000)` to detect mathematically repeating decimals. Only those get the 0.005 absolute tolerance; terminating decimals (0.375, 0.25, etc.) require exact entry.
 - **Home screen is a game launcher at `/`**. Each game lives under its own URL namespace (`/arithmetic`, `/sequences`). Future games add tiles to home.html and new route namespaces.
 - **Sequences game uses session keys prefixed with `seq_`** — `seq_difficulty`, `seq_answer_mode`, `seq_stats`, `seq_current`, `seq_question_log`, `seq_results` — to avoid collision with arithmetic session keys.
+- **Word Associations uses session keys prefixed with `assoc_`** — `assoc_language`, `assoc_used_ids`, `assoc_stats`, `assoc_current`, `assoc_question_log`, `assoc_results` — to avoid collision with other games.
+- **Word Associations question bank is hardcoded JSON** — loaded from `data/associations_en.json` and `data/associations_de.json`. The bank is cached in a module-level dict in `association_engine.py` so files are read only once per process. The bank is never modified at runtime.
+- **Bank exhaustion behaviour**: `get_association_question()` receives `exclude_ids` (session's used ID list). When all 150 IDs are exhausted, `available` falls back to the full bank and the session restarts seamlessly.
+- **Word Associations is Practice-only** — no Test Mode, no timer, no difficulty setting. Language (EN/DE) is the only setting, toggled on the settings page.
 - **Letter keyboard is a custom A–Z grid** (4 rows × 7 columns) in `sequence.html`. Native keyboard is never triggered for letter sequences.
 - **Sequence answers are always exact** — `_check_sequence_answer()` uses string equality (case-insensitive) or numeric tolerance of 0.001. No repeating-decimal tolerance is applied.
 
@@ -245,6 +257,86 @@ V  W  X  Y  Z  ⌫  ✓
 
 ---
 
+## Word Associations Game
+
+### Route Map
+
+| Method | URL | Description |
+|---|---|---|
+| GET | `/associations` | Settings page (`association_home.html`) — language selector (EN/DE) |
+| POST | `/associations/start` | Init session; generates first question; redirects to `/associations/play` |
+| GET | `/associations/play` | Game screen (`association.html`) |
+| POST | `/associations/next` | AJAX — generate next question, returns JSON |
+| POST | `/associations/submit` | AJAX — validate answer, update stats, returns `{correct, correct_answer, result}` |
+| POST | `/associations/end` | Finalise stats, redirect to `/associations/results` |
+| GET | `/associations/results` | Results screen (`association_results.html`) — stats, category breakdown, question log |
+
+### Session Keys
+
+| Key | Type | Description |
+|---|---|---|
+| `assoc_language` | str | `'en'` \| `'de'` — set at `/associations/start`, used throughout the session |
+| `assoc_used_ids` | list | IDs of questions already served in this session (deduplication) |
+| `assoc_stats` | dict | `{total, correct, wrong, skipped}` |
+| `assoc_current` | dict | Current question dict (includes `options` and `correct_index`) |
+| `assoc_question_log` | list | Log entries appended on each `/associations/submit` call |
+| `assoc_results` | dict | Computed at `/associations/end`; includes `language`, `total`, `correct`, `wrong`, `skipped` |
+
+### Question Schema
+
+Each question in the JSON banks has this structure:
+
+```json
+{
+  "id": "en_pw_001",
+  "prompt_a1": "Crown",
+  "prompt_a2": "Tree",
+  "prompt_b1": "Head",
+  "answer": "Body",
+  "distractors": ["Neck", "Torso", "Skull"],
+  "relationship": "The crown is the topmost part of a tree; the head is the topmost part of a body.",
+  "category": "part_to_whole"
+}
+```
+
+When served by `get_association_question()`, the dict is augmented with:
+- `options`: list of 4 strings (answer + 3 distractors, shuffled)
+- `correct_index`: int, position of the correct answer in `options`
+
+The question is displayed as: **Crown : Tree → Head : ___?**
+
+### 10 Analogy Categories
+
+| Category | Description |
+|---|---|
+| `part_to_whole` | A1 is a component of A2; B1 is a component of the answer |
+| `function_purpose` | A1 is used to perform A2; B1 is used to perform the answer |
+| `cause_effect` | A1 causes or leads to A2; B1 causes or leads to the answer |
+| `degree_intensity` | A1 and A2 differ only in intensity; same for B1 and answer |
+| `antonyms` | A1 is the opposite of A2; B1 is the opposite of the answer |
+| `category_member` | A1 belongs to category A2; B1 belongs to the answer category |
+| `location` | A1 lives or exists in A2; B1 lives or exists in the answer |
+| `creator_creation` | A1 creates A2; B1 creates the answer |
+| `tool_user` | A1 is a tool; A2 is the person who uses it (same for B1/answer) |
+| `sequence_order` | A1 comes before A2 in a natural sequence; same for B1/answer |
+
+### Language Support
+
+- `'en'`: English, `data/associations_en.json` (150 questions)
+- `'de'`: German, `data/associations_de.json` (150 questions, adapted/translated)
+- Language is selected on the settings page only (toggle stays fixed during a session)
+- German questions are culturally adapted where direct translation produces unnatural analogies
+
+### Answer Validation
+
+`check_association_answer(user_answer, correct_answer)` — case-insensitive exact string match after stripping whitespace. Always returns bool. Since it is MC-only, the user answer is always one of the 4 presented options.
+
+### relationship Field
+
+Each question has a `relationship` field: 1–2 sentences in plain language explaining the analogy connection. Displayed in the question log on results screen as "Relationship: …". In German questions, the relationship is also in German.
+
+---
+
 ## Settings (Home Screen)
 
 All settings submitted via the `/start` POST form. Stored in `flask.session` for the duration of the session.
@@ -400,6 +492,15 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-04-12]** — Session 10: Word Associations game added as third game on home screen launcher:
+  1. **Question banks** — `data/associations_en.json` and `data/associations_de.json` each contain 150 curated verbal analogy questions across 10 categories (`part_to_whole` ×15, `function_purpose` ×20, `cause_effect` ×15, `degree_intensity` ×15, `antonyms` ×15, `category_member` ×20, `location` ×10, `creator_creation` ×15, `tool_user` ×15, `sequence_order` ×10). Each question has plausible distractors and a plain-language `relationship` field. German questions are culturally adapted, not word-for-word translated.
+  2. **`association_engine.py`** — `load_bank(language)` with module-level cache; `get_association_question(language, rng, exclude_ids)` with bank-exhaustion reset; `check_association_answer()` case-insensitive exact match.
+  3. **Routes in `app.py`** — `GET /associations`, `POST /associations/start`, `GET /associations/play`, `POST /associations/next`, `POST /associations/submit`, `POST /associations/end`, `GET /associations/results`. Session keys prefixed `assoc_`. Category breakdown computed at results route from question log.
+  4. **Templates** — `association_home.html` (language toggle, practice-only info card), `association.html` (analogy display with styled reference/target pairs, MC options, flag modal), `association_results.html` (summary, by-category table, collapsible question log with relationship field).
+  5. **`home.html`** — third game tile added (Word Associations, SVG quote-arrow icon, "Verbal Analogies · EN / DE" subtitle, touchend navigation).
+  6. **`style.css`** — `.lang-selector`, `.lang-btn`, `.assoc-analogy`, `.assoc-reference-pair`, `.assoc-target-pair`, `.assoc-separator`, `.assoc-blank`, `.assoc-word`, `.assoc-word-bold`, `.assoc-arrow`, `.assoc-log-analogy`, `.assoc-log-muted`, `.assoc-log-arrow` added.
+  7. **`CLAUDE.md`** updated: Project Overview, File Map, Architecture Decisions, new Word Associations Game section.
 
 - **[2026-04-12]** — Session 9: four iPhone device-testing fixes:
   1. **Zero `onclick=` policy** — every tappable element now uses `touchend` or `touchstart`. `sequence_home.html` and `sequence_test.html` quit/flag/modal buttons converted to paired `ontouchend=` + `onclick=` via `_tap(e, fn)` helper. `sequence_home.html` start button uses touchend + timestamp guard. `flags.html` already converted (session 8 follow-up). `home.html` tile links use touchend navigation. `style.css` interactive-elements selector expanded to cover `a, button, [role="button"], input[type=submit/button/radio/checkbox], .modal-backdrop, .flag-delete-btn/yes/cancel, .btn-quit-confirm, .back-link, .link-dim`.

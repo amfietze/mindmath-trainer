@@ -21,6 +21,7 @@ from config import (CATEGORIES, TEST_QUESTIONS, TEST_DURATION,
 from question_engine import get_validated_question, generate_test_questions
 from scoring import compute_practice_stats, compute_test_stats
 from sequence_engine import get_sequence_question, attach_sequence_options
+from association_engine import load_bank, get_association_question, check_association_answer
 
 app = Flask(__name__)
 
@@ -843,6 +844,156 @@ def _check_sequence_answer(user: str, correct: str) -> bool:
         return abs(float(user) - float(correct)) < 0.001
     except (ValueError, TypeError):
         return False
+
+
+# ─── word associations ────────────────────────────────────────────────────────
+
+@app.route('/associations')
+def associations():
+    return render_template('association_home.html')
+
+
+@app.route('/associations/start', methods=['POST'])
+def associations_start():
+    language = request.form.get('language', 'en')
+    if language not in ('en', 'de'):
+        language = 'en'
+
+    session['assoc_language'] = language
+    session['assoc_used_ids'] = []
+    session['assoc_stats'] = {'total': 0, 'correct': 0, 'wrong': 0, 'skipped': 0}
+    session['assoc_question_log'] = []
+
+    rng = random.Random()
+    q = get_association_question(language, rng, exclude_ids=[])
+    session['assoc_current'] = q
+    session['assoc_used_ids'] = [q['id']]
+    session.modified = True
+    return redirect(url_for('associations_play'))
+
+
+@app.route('/associations/play')
+def associations_play():
+    if 'assoc_current' not in session:
+        return redirect(url_for('associations'))
+    return render_template(
+        'association.html',
+        question=session['assoc_current'],
+        stats=session.get('assoc_stats', {}),
+        language=session.get('assoc_language', 'en'),
+    )
+
+
+@app.route('/associations/next', methods=['POST'])
+def associations_next():
+    if 'assoc_language' not in session:
+        return jsonify({'error': 'no active association session'}), 400
+
+    language = session['assoc_language']
+    used_ids = session.get('assoc_used_ids', [])
+    rng = random.Random()
+    q = get_association_question(language, rng, exclude_ids=used_ids)
+
+    # Append new ID (reset detection: if bank was exhausted, used_ids may not contain it)
+    if q['id'] not in used_ids:
+        used_ids.append(q['id'])
+    else:
+        # Bank was exhausted and restarted — clear used list, start fresh
+        used_ids = [q['id']]
+
+    session['assoc_current'] = q
+    session['assoc_used_ids'] = used_ids
+    session.modified = True
+    return jsonify(q)
+
+
+@app.route('/associations/submit', methods=['POST'])
+def associations_submit():
+    if 'assoc_language' not in session:
+        return jsonify({'error': 'no active association session'}), 400
+
+    data = request.get_json(force=True)
+    user_answer = str(data.get('user_answer', '')).strip()
+    time_taken = data.get('time_taken')
+    skipped = bool(data.get('skipped', False))
+
+    current_q = session.get('assoc_current', {})
+    correct_answer = current_q.get('answer', '')
+
+    stats = session.get('assoc_stats', {'total': 0, 'correct': 0, 'wrong': 0, 'skipped': 0})
+    stats['total'] = stats.get('total', 0) + 1
+
+    if skipped:
+        stats['skipped'] = stats.get('skipped', 0) + 1
+        result = 'skipped'
+        log_user_answer = '—'
+    else:
+        is_correct = check_association_answer(user_answer, correct_answer)
+        if is_correct:
+            stats['correct'] = stats.get('correct', 0) + 1
+            result = 'correct'
+        else:
+            stats['wrong'] = stats.get('wrong', 0) + 1
+            result = 'wrong'
+        log_user_answer = user_answer if user_answer else '—'
+
+    session['assoc_stats'] = stats
+
+    q_log = session.get('assoc_question_log', [])
+    q_log.append({
+        'number': stats['total'],
+        'prompt_a1': current_q.get('prompt_a1', ''),
+        'prompt_a2': current_q.get('prompt_a2', ''),
+        'prompt_b1': current_q.get('prompt_b1', ''),
+        'answer': correct_answer,
+        'user_answer': log_user_answer,
+        'result': result,
+        'relationship': current_q.get('relationship', ''),
+        'category': current_q.get('category', ''),
+        'time_taken': round(float(time_taken), 1) if time_taken is not None else None,
+    })
+    session['assoc_question_log'] = q_log
+    session.modified = True
+
+    return jsonify({'correct': result == 'correct', 'correct_answer': correct_answer, 'result': result})
+
+
+@app.route('/associations/end', methods=['POST'])
+def associations_end():
+    stats = session.get('assoc_stats', {})
+    session['assoc_results'] = {
+        'total': stats.get('total', 0),
+        'correct': stats.get('correct', 0),
+        'wrong': stats.get('wrong', 0),
+        'skipped': stats.get('skipped', 0),
+        'language': session.get('assoc_language', 'en'),
+    }
+    session.modified = True
+    return jsonify({'redirect': url_for('associations_results')})
+
+
+@app.route('/associations/results')
+def associations_results():
+    if 'assoc_results' not in session:
+        return redirect(url_for('associations'))
+
+    # Build category breakdown from question log
+    q_log = session.get('assoc_question_log', [])
+    by_category = {}
+    for entry in q_log:
+        cat = entry.get('category', 'unknown')
+        if cat not in by_category:
+            by_category[cat] = [0, 0]  # [total, correct]
+        by_category[cat][0] += 1
+        if entry.get('result') == 'correct':
+            by_category[cat][1] += 1
+
+    return render_template(
+        'association_results.html',
+        results=session.get('assoc_results', {}),
+        question_log=q_log,
+        by_category=by_category,
+    )
 
 
 if __name__ == '__main__':
