@@ -10,7 +10,7 @@ MindMath Trainer is a Flask-based multi-game PWA designed to run on an iPhone (S
 
 The app currently has two games, accessible from a game-launcher home screen at `/`:
 - **Mental Arithmetic** — Optiver-style arithmetic training with Open Practice (adaptive, untimed) and Test Mode (80 questions, 8 min, MC). Five question categories across 4 difficulty levels.
-- **Sequences** — Number and letter pattern sequences across four difficulty levels. Practice-only (no timed test mode yet). Supports Multiple Choice and Open Answer (numpad for numbers, A–Z keyboard for letters).
+- **Sequences** — Number and letter pattern sequences across four difficulty levels. Practice Mode (adaptive) and Test Mode (8 min, MC, +1/−1 scoring). Supports Multiple Choice and Open Answer (numpad for numbers, A–Z keyboard for letters).
 
 ---
 
@@ -56,10 +56,11 @@ mental-math-trainer/
     ├── practice.html           Open Practice screen: timer, question card, open/MC answer area, feedback overlay
     ├── test.html               Test Mode screen: global timer, MC options, progress bar, quit button
     ├── results.html            Arithmetic results: score, per-category breakdown (shared for both arithmetic modes)
-    ├── sequence_home.html      Sequences game settings page (/sequences) — difficulty, answer format
-    ├── sequence.html           Sequences game screen (/sequences/play) — term boxes, numpad or A-Z keyboard
-    ├── sequence_results.html   Sequences results: stats, by-type breakdown, question log
-    └── flags.html              Flagged questions viewer (/flags)
+    ├── sequence_home.html      Sequences game settings page (/sequences) — mode, difficulty, answer format
+    ├── sequence.html           Sequences practice game screen (/sequences/play) — term boxes, numpad or A-Z keyboard
+    ├── sequence_test.html      Sequences test mode screen (/sequences/test) — MC, global timer, +1/−1 scoring
+    ├── sequence_results.html   Sequences results: practice stats / test score + performance band, question log with rule
+    └── flags.html              Flagged questions viewer (/flags) — with per-card delete (fade-out, no reload)
 ```
 
 ---
@@ -72,6 +73,7 @@ These decisions are intentional and must not be undone without explicit instruct
 - **Flask server-side sessions** hold all game state: current question, streaks, level modifier, stats, test questions array. No client-side persistence.
 - **Question transitions via AJAX** — no full page reloads during a session (`/next-question`, `/submit-answer`, `/end-session`, `/end-test` are all JSON endpoints). Same pattern applies to sequences (`/sequences/next`, `/sequences/submit`, `/sequences/end`).
 - **`viewport-fit=cover`** is set in the viewport meta tag to enable `env(safe-area-inset-top/bottom)` for iPhone safe area insets (Dynamic Island, notch, home indicator).
+- **Body-level safe-area padding**: `.screen` class (non-game screens: home, arithmetic, sequence_home, results, flags) applies `padding-top: calc(16px + env(safe-area-inset-top, 0px))`. Game screens (`.practice-screen`, `.test-screen`, `.seq-screen`) handle their own env() padding internally, so there is no double-padding.
 - **`session['question_log']`** is initialised as `[]` at session start for both modes. In Practice Mode, every `/submit-answer` call appends one entry. In Test Mode, the full log is built in `/end-test` from `test_questions` + `chosen_answers`. The log is passed to `results.html` as the `question_log` template variable.
 - **Question pre-validation**: all questions served through `get_validated_question()` in `question_engine.py` which applies a 7-point check (finite answer, display parses close to answer, no duplicate MC options, text non-empty with operator, etc.). Retries up to 50 times; falls back to Easy with a `stderr` warning if max attempts exceeded.
 - **`host="0.0.0.0"`** — app binds to all interfaces so it is reachable over local WiFi from iPhone.
@@ -150,22 +152,56 @@ Constraints: all 4 options distinct within 0.001; no distractor >9× or <0.111×
 
 | Method | URL | Description |
 |---|---|---|
-| GET | `/sequences` | Settings page (`sequence_home.html`) |
-| POST | `/sequences/start` | Init session, redirect to `/sequences/play` |
-| GET | `/sequences/play` | Game screen (`sequence.html`) |
-| POST | `/sequences/next` | AJAX — generate next question, returns JSON |
+| GET | `/sequences` | Settings page (`sequence_home.html`) — mode, difficulty, answer format |
+| POST | `/sequences/start` | Init session; redirects to `/sequences/test` (test) or `/sequences/play` (practice) |
+| GET | `/sequences/play` | Practice game screen (`sequence.html`) |
+| POST | `/sequences/next` | AJAX — generate next practice question, returns JSON |
 | POST | `/sequences/submit` | AJAX — validate answer, update stats, returns `{result, correct_answer}` |
-| POST | `/sequences/end` | Finalise stats, redirect to `/sequences/results` |
-| GET | `/sequences/results` | Results screen (`sequence_results.html`) |
+| POST | `/sequences/end` | Finalise practice stats, redirect to `/sequences/results` |
+| GET | `/sequences/test` | Test mode screen (`sequence_test.html`) |
+| POST | `/sequences/test/next` | AJAX — generate next test question (always MC), returns JSON |
+| POST | `/sequences/test/submit` | AJAX — update score (+1/−1/0), append to log, returns `{score, total, correct, wrong}` |
+| POST | `/sequences/test/end` | Finalise test, compute performance band, redirect to `/sequences/results` |
+| GET | `/sequences/results` | Results screen (`sequence_results.html`) — handles both practice and test modes |
 
 ### Sequence Types by Difficulty
 
 | Difficulty | Number types | Letter types |
 |---|---|---|
-| Easy | `arithmetic` (d ±1–5), `geometric_x2` / `geometric_div2` | `alphabet_step` (+1, +2, −1) |
-| Medium | `arithmetic` (d ±5–20), `geometric_x3/x4/div3`, `squares`, `triangular` | `alternating` (+2+3), `alphabet_step` (−2), `alternating` (two interleaved) |
-| Normal | `fibonacci`, `alternating` (interleaved), `increasing_differences`, `arithmetic` (crosses zero) | `positional` (increasing gaps), `two_letter` (AB,CD,EF pairs) |
-| Hard | `diff_of_diffs` (2nd-order), `alternating_op` (×m +a), `power_offset` (2^n+c), `mixed_geom_arith` | `alphabet_wrap` (+3/4/5 with mod 26), `complex_positional` (irregular gaps) |
+| Easy | `arithmetic` (d ±1–5), `geometric_x2` / `geometric_div2` | `alphabet_step` (+1, +2, −1), `vowels` (A,E,I,O,U), `alphabet_step` (skip-2 from Z) |
+| Medium | `arithmetic` (d ±5–20), `geometric_x3/x4/div3`, `squares`, `triangular`, `primes`, `alternating_sign`, `cumulative_sum`, `digit_sum` | `alternating` (+2+3), `alphabet_step` (−2), `alternating` (two interleaved), `alternating_ends` (A,Z,B,Y...), `consonants`, `prime_positions` |
+| Normal | `fibonacci`, `alternating` (interleaved), `increasing_differences`, `arithmetic` (crosses zero), `geometric_alt_sign` (×−r), `square_offset` (n²+c), `alternating_step` (+d1+d2), `cubes` | `positional` (increasing gaps), `two_letter` (AB,CD,EF), `keyboard_row` (QWERTY), `diagonal_grid`, `two_seq_merge` |
+| Hard | `diff_of_diffs` (2nd-order), `alternating_op` (×m +a), `power_offset` (2^n+c), `mixed_geom_arith`, `factorial`, `recursive_double` (×2+c), `interleaved_geometric`, `digital_root` | `alphabet_wrap` (+3/4/5 mod 26), `complex_positional` (irregular gaps), `caesar_shift` (+1,+2,+3...), `fibonacci_positions`, `modular_arithmetic` (×2+1 mod 26) |
+
+### rule_description Field
+
+Every question dict carries `rule_description` — a user-facing plain-language explanation (max 2 lines) of the sequence rule. It is stored in the question log (`seq_question_log` entries) and displayed as a "Rule:" row in the question log on `sequence_results.html`. Examples:
+- Arithmetic: `"Each term increases by 4."`
+- Geometric ×3: `"Each term is multiplied by 3."`
+- Fibonacci: `"Each term is the sum of the two preceding terms (starts 2, 3)."`
+- Alternating step: `"Alternating steps: +2 then +3, repeating."`
+- Keyboard row: `"Consecutive letters from the top row of a QWERTY keyboard."`
+- Caesar shift: `"Each letter is shifted by an increasing amount: +1, +2, +3, +4... (Caesar cipher)."`
+
+### Test Mode (Sequences)
+
+- Duration: 8 minutes (`SEQ_TEST_DURATION = 480` in `app.py`).
+- Always MC (4 options). Open answer setting is hidden in test mode.
+- Scoring: +1 correct, −1 wrong, 0 skipped.
+- Questions generated on demand (not pre-generated), via `_next_seq_test_question()`.
+- No feedback between questions — answer tapped → submit → next question loaded immediately.
+- Global countdown timer; auto-POSTs to `/sequences/test/end` at 0:00.
+- Quit button with inline confirmation (same pattern as arithmetic test).
+
+**Performance bands** (shown on results screen):
+
+| Score | Band |
+|---|---|
+| ≥ 40 | Excellent |
+| 30–39 | Great |
+| 20–29 | Good |
+| 10–19 | Getting there |
+| < 10 | Keep practising |
 
 ### Blank Position Rules
 
@@ -181,11 +217,18 @@ Constraints: all 4 options distinct within 0.001; no distractor >9× or <0.111×
 | Key | Type | Description |
 |---|---|---|
 | `seq_difficulty` | str | `easy` \| `medium` \| `normal` \| `hard` |
-| `seq_answer_mode` | str | `mc` \| `open` |
-| `seq_stats` | dict | `{total, correct, wrong, skipped, total_time, by_type}` |
+| `seq_mode` | str | `practice` \| `test` |
+| `seq_answer_mode` | str | `mc` \| `open` (practice only) |
+| `seq_stats` | dict | `{total, correct, wrong, skipped, total_time, by_type}` (practice only) |
 | `seq_current` | dict | Current question dict from `get_sequence_question()` |
-| `seq_question_log` | list | List of log entry dicts (appended per answer) |
-| `seq_results` | dict | Computed at `/sequences/end`, passed to results template |
+| `seq_question_log` | list | Log entries (appended per answer, both modes). Each entry includes `rule_description`. |
+| `seq_results` | dict | Computed at `/sequences/end` or `/sequences/test/end`; includes `mode` key |
+| `seq_test_score` | int | Running +1/−1/0 score (test mode only) |
+| `seq_test_total` | int | Total questions answered (test mode only) |
+| `seq_test_correct` | int | Correct count (test mode only) |
+| `seq_test_wrong` | int | Wrong count (test mode only) |
+| `seq_test_skipped` | int | Skipped count (test mode only) |
+| `seq_test_start` | float | `time.time()` at test start (for elapsed calculation) |
 
 ### Letter Keyboard Layout
 
@@ -314,6 +357,8 @@ Users can flag a question using the 🚩 button during any mode.
   }
   ```
 - **Review page**: `GET /flags` — renders `flags.html` with all flags in reverse-chronological order.
+- **Delete endpoint**: `POST /flags/delete` — receives JSON `{ "index": N }` where N is the 0-based index in the reverse-chronological display order (index 0 = newest). Loads the file, converts to reverse order, removes entry at N, converts back, writes. Returns `{ "success": true, "remaining": M }` or `{ "error": "..." }` with status 400/500. Handles missing file (returns success, 0), index out of range (400).
+- **Frontend deletion**: each flag card has a "✕ Delete" button. Click shows inline confirmation `"Delete this flag? [Yes] [Cancel]"`. Confirmed → `fetch` to `/flags/delete` → card fades out (opacity→0, 200ms) → removed from DOM → count header updated. If all deleted, empty-state message shown. No page reload. After each deletion, remaining cards are re-indexed in JS (`reindexCards()`).
 - `flagged_questions.json` is excluded from git (`.gitignore`).
 
 ---
@@ -352,6 +397,15 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-04-12]** — Session 8: seven targeted fixes and features:
+  1. **Safe area on all screens** — `.screen` class now applies `padding-top: calc(16px + env(safe-area-inset-top, 0px))`. Non-game screens (home, arithmetic, sequence_home, results, flags) correctly clear the Dynamic Island/notch. Game screens already handle their own env() — no double-padding.
+  2. **Sequence rule descriptions** — all `rule_description` fields in `sequence_engine.py` updated to user-facing plain-language text (e.g. "Each term increases by 4."). Stored in question log. Displayed as a "Rule:" row in each question log card on `sequence_results.html`.
+  3. **Expanded sequence types** — 20 new sequence generators added across all difficulty levels (see Sequence Types table). Total: 10 number types × 4 levels (Easy×2→4, Medium×4→8, Normal×4→8, Hard×4→8); 5+ letter types per level.
+  4. **Home tile icons updated** — Mental Arithmetic: `Σ` (Greek sigma, bold accent purple). Sequences: inline SVG sine wave (1.5 cycles, accent purple stroke).
+  5. **Custom PWA icon** — Brain with muscular arms mascot generated via Pillow (cairosvg not available). SVG source saved to `icon.svg` in project root. `icon-192.png` and `icon-512.png` in `static/` updated.
+  6. **Flag delete** — `POST /flags/delete` endpoint added to `app.py`. `flags.html` updated with per-card delete button, inline confirmation, fade-out animation, DOM count update, full re-indexing. No page reload.
+  7. **Sequences Test Mode** — New 8-minute MC test mode for sequences. Routes: `GET /sequences/test`, `POST /sequences/test/next`, `POST /sequences/test/submit`, `POST /sequences/test/end`. New template `sequence_test.html`. `sequence_home.html` updated with mode selector (Practice/Test). `sequence_results.html` updated to handle both modes: practice shows existing stats; test shows score + performance band. `CLAUDE.md` updated.
 
 - **[2026-04-11]** — Session 7: game launcher redesign + Sequences game:
   1. **Game launcher home screen** — `/` now renders `home.html` as a clean tile launcher with two game tiles (Mental Arithmetic → `/arithmetic`, Sequences → `/sequences`). All arithmetic settings (mode, difficulty, timer, answer format, Start button) moved to new `arithmetic.html` template at `/arithmetic` GET route, with "← Back" link. The `/start` POST route is unchanged.

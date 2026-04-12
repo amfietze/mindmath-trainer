@@ -2,6 +2,48 @@
 {% block title %}Results – Sequences – MindMath{% endblock %}
 {% block body %}
 <div class="screen">
+
+  {% if results.mode == 'test' %}
+  <!-- ── TEST MODE RESULTS ── -->
+  <div class="results-header">
+    <div class="result-badge practice-badge">SEQUENCES TEST</div>
+    <div class="test-score-big">
+      <span class="test-score-pts {% if results.score >= 0 %}positive{% else %}negative{% endif %}">
+        {% if results.score >= 0 %}+{% endif %}{{ results.score }}
+      </span>
+      <span class="test-score-unit">pts</span>
+    </div>
+    <span class="perf-badge {{ results.perf_class }}">{{ results.performance }}</span>
+    <div class="score-note">{{ results.difficulty | capitalize }} · 8 min test</div>
+  </div>
+
+  <div class="card stats-card">
+    <div class="stat-row">
+      <div class="stat-cell correct">
+        <div class="stat-val">{{ results.correct }}</div>
+        <div class="stat-lbl">Correct</div>
+      </div>
+      <div class="stat-cell wrong">
+        <div class="stat-val">{{ results.wrong }}</div>
+        <div class="stat-lbl">Wrong</div>
+      </div>
+      <div class="stat-cell skipped">
+        <div class="stat-val">{{ results.skipped }}</div>
+        <div class="stat-lbl">Skipped</div>
+      </div>
+    </div>
+    <div class="pct-row">
+      {% if results.total > 0 %}
+        <span class="pct correct">{{ (results.correct / results.total * 100) | round | int }}% correct</span>
+        <span class="pct wrong">{{ (results.wrong / results.total * 100) | round | int }}% wrong</span>
+        <span class="pct skipped">{{ (results.skipped / results.total * 100) | round | int }}% skipped</span>
+      {% endif %}
+    </div>
+    <div class="avg-time" style="margin-top:6px">{{ results.total }} questions answered · +1 correct · −1 wrong · 0 skipped</div>
+  </div>
+
+  {% else %}
+  <!-- ── PRACTICE MODE RESULTS ── -->
   <div class="results-header">
     <div class="result-badge practice-badge">SEQUENCES</div>
     <div class="big-score">
@@ -11,7 +53,6 @@
     <div class="score-note">{{ results.difficulty | capitalize }} · {{ results.answer_mode | upper }}</div>
   </div>
 
-  <!-- Summary stats card -->
   <div class="card stats-card">
     <div class="stat-row">
       <div class="stat-cell correct">
@@ -39,7 +80,7 @@
     {% endif %}
   </div>
 
-  <!-- Breakdown by sequence type -->
+  <!-- Breakdown by sequence type (practice only) -->
   {% if results.by_type %}
   <div class="card">
     <h2>By Sequence Type</h2>
@@ -75,8 +116,9 @@
     </table>
   </div>
   {% endif %}
+  {% endif %}
 
-  <!-- Question log (collapsible) -->
+  <!-- Question log (collapsible, both modes) -->
   {% if question_log %}
   <div class="card question-log-section">
     <div class="question-log-header" onclick="toggleLog(this)">
@@ -94,6 +136,9 @@
           {% endif %}
         </div>
         <div class="q-log-text">{{ entry.sequence_display | join(' · ') }}</div>
+        {% if entry.rule_description %}
+          <div class="q-log-rule"><strong>Rule:</strong> {{ entry.rule_description }}</div>
+        {% endif %}
         <div class="q-log-result q-log-result-{{ entry.result }}">
           {% if entry.result == 'correct' %}✓ Correct
           {% elif entry.result == 'wrong' %}✗ Wrong

@@ -374,6 +374,40 @@ def flags():
     return render_template('flags.html', flags=data)
 
 
+@app.route('/flags/delete', methods=['POST'])
+def flags_delete():
+    data = request.get_json(force=True)
+    try:
+        idx = int(data.get('index', -1))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'invalid index'}), 400
+
+    if idx < 0:
+        return jsonify({'error': 'invalid index'}), 400
+
+    try:
+        if not os.path.exists(FLAGGED_FILE):
+            return jsonify({'success': True, 'remaining': 0})
+
+        with open(FLAGGED_FILE, 'r', encoding='utf-8') as f:
+            existing = json.load(f)
+
+        # The page shows flags in reverse order; idx 0 = newest = last in file
+        rev = list(reversed(existing))
+        if idx >= len(rev):
+            return jsonify({'error': 'index out of range'}), 400
+
+        del rev[idx]
+        existing = list(reversed(rev))
+
+        with open(FLAGGED_FILE, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, indent=2, ensure_ascii=False)
+
+        return jsonify({'success': True, 'remaining': len(existing)})
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
 # ─── sequences ────────────────────────────────────────────────────────────────
 
 @app.route('/sequences')
@@ -385,9 +419,23 @@ def sequences():
 def sequences_start():
     difficulty = request.form.get('difficulty', 'normal')
     answer_mode = request.form.get('answer_mode', 'mc')
+    mode = request.form.get('mode', 'practice')
+
+    if mode == 'test':
+        session['seq_difficulty'] = difficulty
+        session['seq_mode'] = 'test'
+        session['seq_test_score'] = 0
+        session['seq_test_total'] = 0
+        session['seq_test_correct'] = 0
+        session['seq_test_wrong'] = 0
+        session['seq_test_skipped'] = 0
+        session['seq_question_log'] = []
+        session.modified = True
+        return redirect(url_for('sequences_test'))
 
     session['seq_difficulty'] = difficulty
     session['seq_answer_mode'] = answer_mode
+    session['seq_mode'] = 'practice'
     session['seq_stats'] = {
         'total': 0, 'correct': 0, 'wrong': 0, 'skipped': 0,
         'total_time': 0.0, 'by_type': {},
@@ -483,6 +531,7 @@ def sequences_submit():
         'sequence_display': seq_display,
         'sequence_type': seq_type,
         'category': current_q.get('category', ''),
+        'rule_description': current_q.get('rule_description', ''),
         'user_answer': log_user_answer,
         'correct_answer': correct_answer,
         'result': result,
@@ -503,6 +552,7 @@ def sequences_end():
     avg_time = round(total_time / answered, 1) if answered > 0 else None
 
     session['seq_results'] = {
+        'mode': 'practice',
         'total': total,
         'correct': stats.get('correct', 0),
         'wrong': stats.get('wrong', 0),
@@ -525,6 +575,152 @@ def sequences_results():
         results=session.get('seq_results', {}),
         question_log=session.get('seq_question_log', []),
     )
+
+
+# ─── sequences test mode ──────────────────────────────────────────────────────
+
+SEQ_TEST_DURATION = 480  # 8 minutes in seconds
+
+
+@app.route('/sequences/test')
+def sequences_test():
+    if session.get('seq_mode') != 'test' or 'seq_difficulty' not in session:
+        return redirect(url_for('sequences'))
+    first_q = _next_seq_test_question()
+    session['seq_test_start'] = time.time()
+    session['seq_current'] = first_q
+    session.modified = True
+    return render_template(
+        'sequence_test.html',
+        question=first_q,
+        difficulty=session.get('seq_difficulty', 'normal'),
+        test_duration=SEQ_TEST_DURATION,
+        start_time=session['seq_test_start'],
+    )
+
+
+@app.route('/sequences/test/next', methods=['POST'])
+def sequences_test_next():
+    if session.get('seq_mode') != 'test':
+        return jsonify({'error': 'not in sequence test mode'}), 400
+    q = _next_seq_test_question()
+    session['seq_current'] = q
+    session.modified = True
+    return jsonify(q)
+
+
+@app.route('/sequences/test/submit', methods=['POST'])
+def sequences_test_submit():
+    if session.get('seq_mode') != 'test':
+        return jsonify({'error': 'not in sequence test mode'}), 400
+
+    data = request.get_json(force=True)
+    is_correct = bool(data.get('is_correct', False))
+    skipped = bool(data.get('skipped', False))
+    question_data = data.get('question_data', {})
+
+    total = session.get('seq_test_total', 0) + 1
+    score = session.get('seq_test_score', 0)
+    correct = session.get('seq_test_correct', 0)
+    wrong = session.get('seq_test_wrong', 0)
+    skipped_count = session.get('seq_test_skipped', 0)
+
+    if skipped:
+        skipped_count += 1
+        result = 'skipped'
+        log_user_answer = '—'
+    elif is_correct:
+        score += 1
+        correct += 1
+        result = 'correct'
+        options = question_data.get('options', [])
+        mc_idx = data.get('mc_selected_index')
+        log_user_answer = (options[int(mc_idx)] if mc_idx is not None and int(mc_idx) < len(options)
+                           else str(data.get('answer', '—')))
+    else:
+        score -= 1
+        wrong += 1
+        result = 'wrong'
+        options = question_data.get('options', [])
+        mc_idx = data.get('mc_selected_index')
+        log_user_answer = (options[int(mc_idx)] if mc_idx is not None and int(mc_idx) < len(options)
+                           else str(data.get('answer', '—')))
+
+    session['seq_test_total'] = total
+    session['seq_test_score'] = score
+    session['seq_test_correct'] = correct
+    session['seq_test_wrong'] = wrong
+    session['seq_test_skipped'] = skipped_count
+
+    # Append to question log
+    q_log = session.get('seq_question_log', [])
+    q_log.append({
+        'number': total,
+        'sequence_display': question_data.get('sequence_display', []),
+        'sequence_type': question_data.get('sequence_type', ''),
+        'category': question_data.get('category', ''),
+        'rule_description': question_data.get('rule_description', ''),
+        'user_answer': log_user_answer,
+        'correct_answer': question_data.get('answer', ''),
+        'result': result,
+        'time_taken': None,
+    })
+    session['seq_question_log'] = q_log
+    session.modified = True
+
+    return jsonify({
+        'score': score,
+        'total': total,
+        'correct': correct,
+        'wrong': wrong,
+    })
+
+
+@app.route('/sequences/test/end', methods=['POST'])
+def sequences_test_end():
+    if session.get('seq_mode') != 'test':
+        return jsonify({'redirect': url_for('sequences')}), 200
+
+    score = session.get('seq_test_score', 0)
+    total = session.get('seq_test_total', 0)
+    correct = session.get('seq_test_correct', 0)
+    wrong = session.get('seq_test_wrong', 0)
+    skipped = session.get('seq_test_skipped', 0)
+    difficulty = session.get('seq_difficulty', 'normal')
+
+    # Performance band
+    if score >= 40:
+        performance = 'Excellent'
+        perf_class = 'perf-excellent'
+    elif score >= 30:
+        performance = 'Great'
+        perf_class = 'perf-great'
+    elif score >= 20:
+        performance = 'Good'
+        perf_class = 'perf-good'
+    elif score >= 10:
+        performance = 'Getting there'
+        perf_class = 'perf-getting'
+    else:
+        performance = 'Keep practising'
+        perf_class = 'perf-keep'
+
+    session['seq_results'] = {
+        'mode': 'test',
+        'score': score,
+        'total': total,
+        'correct': correct,
+        'wrong': wrong,
+        'skipped': skipped,
+        'avg_time': None,
+        'by_type': {},
+        'difficulty': difficulty,
+        'answer_mode': 'mc',
+        'performance': performance,
+        'perf_class': perf_class,
+    }
+    session.modified = True
+    return jsonify({'redirect': url_for('sequences_results')})
 
 
 # ─── internal helpers ─────────────────────────────────────────────────────────
@@ -625,6 +821,15 @@ def _next_seq_question() -> dict:
     q = get_sequence_question(difficulty, rng)
     if answer_mode == 'mc':
         q = attach_sequence_options(q, rng)
+    return q
+
+
+def _next_seq_test_question() -> dict:
+    """Generate a sequence question for test mode (always MC)."""
+    difficulty = session.get('seq_difficulty', 'normal')
+    rng = random.Random()
+    q = get_sequence_question(difficulty, rng)
+    q = attach_sequence_options(q, rng)
     return q
 
 

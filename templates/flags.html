@@ -12,24 +12,113 @@
   </header>
 
   {% if flags %}
-    <p class="flag-count">{{ flags | length }} flag{{ 's' if flags | length != 1 }}</p>
+    <p class="flag-count" id="flag-count">{{ flags | length }} flag{{ 's' if flags | length != 1 }}</p>
     {% for f in flags %}
-    <div class="flag-card">
+    <div class="flag-card" id="flag-card-{{ loop.index0 }}" data-flag-index="{{ loop.index0 }}">
       <div class="flag-meta">
         <span class="badge mode-{{ f.game_mode }}">{{ f.game_mode | capitalize }}</span>
         <span class="badge diff-{{ f.difficulty }}">{{ f.difficulty | capitalize }}</span>
         <span class="badge cat">{{ f.category | capitalize }}</span>
         <span class="flag-ts">{{ f.timestamp }}</span>
+        <button class="flag-delete-btn" onclick="askDeleteFlag({{ loop.index0 }})">✕ Delete</button>
       </div>
       <div class="flag-question">{{ f.question_text }}</div>
       <div class="flag-answer">Answer: <strong>{{ f.correct_answer }}</strong></div>
       {% if f.user_comment %}
       <div class="flag-comment-display">💬 {{ f.user_comment }}</div>
       {% endif %}
+      <div class="flag-delete-confirm" id="delete-confirm-{{ loop.index0 }}" style="display:none">
+        <span>Delete this flag?</span>
+        <div class="flag-delete-confirm-btns">
+          <button class="flag-delete-yes" onclick="confirmDeleteFlag({{ loop.index0 }})">Yes</button>
+          <button class="flag-delete-cancel" onclick="cancelDeleteFlag({{ loop.index0 }})">Cancel</button>
+        </div>
+      </div>
     </div>
     {% endfor %}
   {% else %}
-    <div class="empty-state">No flagged questions yet.</div>
+    <div class="empty-state" id="empty-state">No flagged questions. Flag questions during practice to review them here.</div>
   {% endif %}
 </div>
+
+<script>
+var totalFlags = {{ flags | length }};
+
+function askDeleteFlag(idx) {
+  document.getElementById('delete-confirm-' + idx).style.display = 'flex';
+}
+
+function cancelDeleteFlag(idx) {
+  document.getElementById('delete-confirm-' + idx).style.display = 'none';
+}
+
+function confirmDeleteFlag(idx) {
+  fetch('/flags/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ index: idx }),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.success) {
+      var card = document.getElementById('flag-card-' + idx);
+      if (card) {
+        card.style.transition = 'opacity 0.2s';
+        card.style.opacity = '0';
+        setTimeout(function() {
+          card.style.display = 'none';
+          totalFlags--;
+          // Update count display
+          var countEl = document.getElementById('flag-count');
+          if (countEl) {
+            if (totalFlags <= 0) {
+              countEl.style.display = 'none';
+              var emptyEl = document.getElementById('empty-state');
+              if (!emptyEl) {
+                var div = document.createElement('div');
+                div.id = 'empty-state';
+                div.className = 'empty-state';
+                div.textContent = 'No flagged questions. Flag questions during practice to review them here.';
+                document.querySelector('.flags-screen').appendChild(div);
+              } else {
+                emptyEl.style.display = '';
+              }
+            } else {
+              countEl.textContent = totalFlags + ' flag' + (totalFlags !== 1 ? 's' : '');
+            }
+          }
+          // Re-index remaining cards
+          reindexCards();
+        }, 210);
+      }
+    }
+  })
+  .catch(function(err) {
+    console.error('Delete failed:', err);
+    cancelDeleteFlag(idx);
+  });
+}
+
+function reindexCards() {
+  // After deletion, update data-flag-index and id attributes for remaining visible cards
+  var cards = document.querySelectorAll('.flag-card:not([style*="display: none"])');
+  var newIdx = 0;
+  cards.forEach(function(card) {
+    var oldIdx = parseInt(card.getAttribute('data-flag-index'));
+    // Update onclick handlers for this card's delete button
+    var deleteBtn = card.querySelector('.flag-delete-btn');
+    var confirmDiv = card.querySelector('.flag-delete-confirm');
+    var yesBtn = card.querySelector('.flag-delete-yes');
+    var cancelBtn = card.querySelector('.flag-delete-cancel');
+
+    if (deleteBtn) deleteBtn.setAttribute('onclick', 'askDeleteFlag(' + newIdx + ')');
+    if (confirmDiv) confirmDiv.id = 'delete-confirm-' + newIdx;
+    if (yesBtn) yesBtn.setAttribute('onclick', 'confirmDeleteFlag(' + newIdx + ')');
+    if (cancelBtn) cancelBtn.setAttribute('onclick', 'cancelDeleteFlag(' + newIdx + ')');
+    card.id = 'flag-card-' + newIdx;
+    card.setAttribute('data-flag-index', newIdx);
+    newIdx++;
+  });
+}
+</script>
 {% endblock %}

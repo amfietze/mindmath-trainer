@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}Sequences Test – MindMath{% endblock %}
+{% block body %}
+<div class="screen seq-screen">
+
+  <!-- TOP BAR -->
+  <div class="top-bar test-top-bar">
+    <button class="quit-btn" id="quit-btn">&#x2715; Quit</button>
+    <div class="stat-mini">
+      <span id="stat-correct">0</span> ✓
+      <span id="stat-wrong" style="margin-left:8px">0</span> ✗
+    </div>
+    <div id="global-timer" class="timer test-timer">8:00</div>
+    <div class="score-display seq-test-score">
+      <span id="score-val">0</span>
+      <span class="score-label"> pts</span>
+    </div>
+    <button id="flag-btn" class="btn-pause">🚩</button>
+  </div>
+
+  <!-- Quit confirmation -->
+  <div class="quit-confirm" id="quit-confirm" style="display:none">
+    <p>Are you sure? Your progress will be lost.</p>
+    <div class="quit-confirm-btns">
+      <button class="btn-secondary" onclick="hideQuitConfirm()">Cancel</button>
+      <button class="btn-quit-confirm" onclick="confirmQuit()">Yes, quit</button>
+    </div>
+  </div>
+
+  <!-- QUESTION ZONE -->
+  <div class="middle-zone">
+    <div class="question-card" id="question-card">
+      <div class="seq-row" id="seq-row">
+        {% for term in question.sequence_display %}
+          <div class="seq-term-box{% if term == '?' %} seq-blank-box{% endif %}">{{ term }}</div>
+        {% endfor %}
+      </div>
+      <div class="question-category" id="seq-type-label">
+        {{ 'NUMBER SEQUENCE' if question.category == 'number_sequence' else 'LETTER SEQUENCE' }}
+      </div>
+    </div>
+  </div>
+
+  <!-- ANSWER ZONE: always MC -->
+  <div class="bottom-zone">
+    <div class="options-grid" id="options-grid">
+      {% for opt in question.options %}
+        <button class="option-btn"
+                ontouchstart="optionTap({{ loop.index0 }}, event)"
+                onclick="chooseOption({{ loop.index0 }})">{{ opt }}</button>
+      {% endfor %}
+    </div>
+    <button class="btn-skip" id="skip-btn"
+            ontouchstart="skipTap(event)"
+            onclick="chooseOption(null)">Skip</button>
+  </div>
+
+</div>
+
+<!-- Flag modal -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
+<div class="modal" id="flag-modal" style="display:none">
+  <h3>Flag this question</h3>
+  <div class="modal-question" id="modal-q-text"></div>
+  <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
+  <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
+  <div class="modal-btns">
+    <button class="btn-secondary" onclick="closeFlag()">Cancel</button>
+    <button class="btn-primary" onclick="submitFlag()">Submit Flag</button>
+  </div>
+</div>
+
+<script>
+const TEST_DURATION = {{ test_duration }};
+const SERVER_START = {{ start_time }};
+const DIFFICULTY = "{{ difficulty }}";
+
+let currentQuestion = {{ question | tojson }};
+let timerInterval = null;
+let testEnded = false;
+let busy = false;
+let lastOptionTouch = 0;
+let lastSkipTouch = 0;
+
+// ── Timer ────────────────────────────────────────────────────────────────────
+
+function getRemaining() {
+  var elapsed = (Date.now() / 1000) - SERVER_START;
+  return Math.max(0, TEST_DURATION - elapsed);
+}
+
+function updateTimerDisplay(remaining) {
+  var mins = Math.floor(remaining / 60);
+  var secs = Math.floor(remaining % 60);
+  var str = mins + ':' + (secs < 10 ? '0' : '') + secs;
+  var el = document.getElementById('global-timer');
+  el.textContent = str;
+  el.classList.toggle('urgent', remaining <= 30);
+}
+
+function startTimer() {
+  updateTimerDisplay(getRemaining());
+  timerInterval = setInterval(function() {
+    var rem = getRemaining();
+    updateTimerDisplay(rem);
+    if (rem <= 0 && !testEnded) {
+      clearInterval(timerInterval);
+      endTest();
+    }
+  }, 500);
+}
+
+// ── Question rendering ───────────────────────────────────────────────────────
+
+function renderQuestion(q) {
+  currentQuestion = q;
+
+  // Sequence row
+  var row = document.getElementById('seq-row');
+  row.innerHTML = '';
+  q.sequence_display.forEach(function(term) {
+    var box = document.createElement('div');
+    box.className = 'seq-term-box' + (term === '?' ? ' seq-blank-box' : '');
+    box.textContent = term;
+    row.appendChild(box);
+  });
+
+  // Type label
+  document.getElementById('seq-type-label').textContent =
+    q.category === 'number_sequence' ? 'NUMBER SEQUENCE' : 'LETTER SEQUENCE';
+
+  // Options
+  var grid = document.getElementById('options-grid');
+  grid.innerHTML = '';
+  (q.options || []).forEach(function(opt, i) {
+    var btn = document.createElement('button');
+    btn.className = 'option-btn';
+    btn.textContent = opt;
+    btn.ontouchstart = function(e) { optionTap(i, e); };
+    btn.onclick = function() { chooseOption(i); };
+    grid.appendChild(btn);
+  });
+}
+
+// ── Answer handling ──────────────────────────────────────────────────────────
+
+function optionTap(idx, e) {
+  e.preventDefault();
+  lastOptionTouch = Date.now();
+  chooseOption(idx);
+}
+
+function skipTap(e) {
+  e.preventDefault();
+  lastSkipTouch = Date.now();
+  chooseOption(null);
+}
+
+function chooseOption(idx) {
+  if (testEnded || busy) return;
+  // Debounce double-fire
+  if (idx !== null && Date.now() - lastOptionTouch < 600 && event && event.type === 'click') return;
+  if (idx === null && Date.now() - lastSkipTouch < 600 && event && event.type === 'click') return;
+
+  busy = true;
+
+  var isSkipped = (idx === null);
+  var isCorrect = (!isSkipped && idx === currentQuestion.correct_index);
+
+  var payload = {
+    skipped: isSkipped,
+    is_correct: isCorrect,
+    mc_selected_index: isSkipped ? null : idx,
+    question_data: currentQuestion,
+  };
+
+  fetch('/sequences/test/submit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    // Update scoreboard
+    document.getElementById('score-val').textContent = data.score >= 0 ? '+' + data.score : data.score;
+    document.getElementById('stat-correct').textContent = data.correct;
+    document.getElementById('stat-wrong').textContent = data.wrong;
+
+    // Fetch and render next question
+    return fetch('/sequences/test/next', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({}),
+    });
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(q) {
+    renderQuestion(q);
+    busy = false;
+  })
+  .catch(function() { busy = false; });
+}
+
+// ── End test ─────────────────────────────────────────────────────────────────
+
+function endTest() {
+  if (testEnded) return;
+  testEnded = true;
+  clearInterval(timerInterval);
+  var elapsed = (Date.now() / 1000) - SERVER_START;
+  fetch('/sequences/test/end', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ elapsed: elapsed }),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.redirect) window.location.href = data.redirect;
+  })
+  .catch(function() { window.location.href = '/sequences'; });
+}
+
+// ── Quit ─────────────────────────────────────────────────────────────────────
+
+function showQuitConfirm() {
+  document.getElementById('quit-confirm').style.display = 'block';
+  document.getElementById('quit-btn').disabled = true;
+}
+
+function hideQuitConfirm() {
+  document.getElementById('quit-confirm').style.display = 'none';
+  document.getElementById('quit-btn').disabled = false;
+}
+
+function confirmQuit() {
+  testEnded = true;
+  clearInterval(timerInterval);
+  window.location.href = '/quit';
+}
+
+// ── Flag ─────────────────────────────────────────────────────────────────────
+
+function openFlag() {
+  var display = (currentQuestion.sequence_display || []).join(' · ');
+  document.getElementById('modal-q-text').textContent = display;
+  document.getElementById('modal-q-answer').textContent = currentQuestion.answer || '';
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'flex';
+}
+
+function closeFlag() {
+  document.getElementById('modal-backdrop').style.display = 'none';
+  document.getElementById('flag-modal').style.display = 'none';
+}
+
+function submitFlag() {
+  var comment = document.getElementById('flag-comment').value.trim();
+  var display = (currentQuestion.sequence_display || []).join(' · ');
+  fetch('/flag', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      game_mode: 'seq_test',
+      difficulty: DIFFICULTY,
+      question_text: display,
+      correct_answer: currentQuestion.answer || '',
+      category: currentQuestion.sequence_type || 'sequence',
+      user_comment: comment,
+    }),
+  }).then(function() { closeFlag(); });
+}
+
+// ── Bindings ─────────────────────────────────────────────────────────────────
+
+(function() {
+  function bindBtn(id, handler) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var lastT = 0;
+    el.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      lastT = Date.now();
+      handler();
+    }, { passive: false });
+    el.addEventListener('click', function() {
+      if (Date.now() - lastT < 600) return;
+      handler();
+    });
+  }
+
+  bindBtn('quit-btn', showQuitConfirm);
+  bindBtn('flag-btn', openFlag);
+
+  startTimer();
+})();
+</script>
+{% endblock %}
