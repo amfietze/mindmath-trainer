@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Sequences – MindMath{% endblock %}
+{% block body %}
+<div class="screen home-screen">
+  <header class="home-header">
+    <a href="/" class="back-link">← Back</a>
+    <div class="logo">…</div>
+    <h1>Sequences</h1>
+    <p class="subtitle">Number &amp; Letter Patterns</p>
+  </header>
+
+  <form method="POST" action="/sequences/start" id="seqForm">
+    <!-- Difficulty selection -->
+    <section class="card">
+      <h2>Difficulty</h2>
+      <div class="diff-grid" role="group">
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="easy">
+          <span>
+            <strong>Easy</strong>
+            <small>+1/+2, ×2, ABC</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="medium">
+          <span>
+            <strong>Medium</strong>
+            <small>Geometric, squares</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="normal" checked>
+          <span>
+            <strong>Normal</strong>
+            <small>Fibonacci, mixed</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="hard">
+          <span>
+            <strong>Hard</strong>
+            <small>2nd-order, complex</small>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Answer format -->
+    <section class="card settings-card">
+      <h2>Settings</h2>
+      <div class="setting-row">
+        <span class="setting-label">Answer format</span>
+        <div class="seg-group" role="group">
+          <label class="seg-btn selected">
+            <input type="radio" name="answer_mode" value="mc" checked>Multiple Choice
+          </label>
+          <label class="seg-btn">
+            <input type="radio" name="answer_mode" value="open">Open Answer
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <button type="button" class="btn-primary btn-start" id="start-btn">Start</button>
+  </form>
+
+  <footer class="home-footer">
+    <a href="/flags" class="link-dim">Review flagged questions →</a>
+  </footer>
+</div>
+
+<script>
+  document.querySelectorAll('input[type="radio"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      var name = this.getAttribute('name');
+      document.querySelectorAll('input[name="' + name + '"]').forEach(function(r) {
+        r.closest('label').classList.remove('selected');
+      });
+      this.closest('label').classList.add('selected');
+    });
+    if (radio.checked) radio.closest('label').classList.add('selected');
+  });
+
+  (function() {
+    var btn = document.getElementById('start-btn');
+    var lastTouch = 0;
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      lastTouch = Date.now();
+      document.getElementById('seqForm').submit();
+    }, { passive: false });
+    btn.addEventListener('click', function() {
+      if (Date.now() - lastTouch < 600) return;
+      document.getElementById('seqForm').submit();
+    });
+  })();
+</script>
+{% endblock %}

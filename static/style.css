@@ -38,7 +38,8 @@ html, body {
 /* Interactive elements: ensure cursor, no text selection, tap highlight suppressed */
 .btn, .btn-skip, .btn-pause, .btn-end, .btn-primary, .btn-secondary,
 .numpad-key, .numpad-backspace, .numpad-submit, .numpad-minus,
-.option-btn, .quit-btn, .seg-btn, .mode-btn, .diff-btn {
+.option-btn, .quit-btn, .seg-btn, .mode-btn, .diff-btn,
+.letter-key, .game-tile {
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -60,7 +61,8 @@ a { color: var(--accent); text-decoration: none; }
 
 /* Game screens: lock to viewport, no page scroll */
 .practice-screen,
-.test-screen {
+.test-screen,
+.seq-screen {
   height: 100dvh;
   min-height: unset;
   overflow: hidden;
@@ -142,10 +144,74 @@ a { color: var(--accent); text-decoration: none; }
 .home-header {
   text-align: center;
   padding: 24px 0 8px;
+  position: relative;
 }
 .logo { font-size: 48px; line-height: 1; margin-bottom: 8px; }
 .home-header h1 { font-size: 32px; font-weight: 800; letter-spacing: -.02em; }
 .subtitle { color: var(--text-dim); font-size: 14px; margin-top: 4px; }
+
+/* Back link in header */
+.home-header .back-link {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.home-header .back-link:active { opacity: .7; }
+
+/* ── GAME TILES (launcher) ──────────────────────────────────────────────── */
+.game-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.game-tile {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 18px;
+  text-decoration: none;
+  color: var(--text);
+  min-height: 88px;
+  transition: border-color .15s, background .15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.game-tile:active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.game-tile-icon {
+  font-size: 36px;
+  font-weight: 900;
+  color: var(--accent);
+  min-width: 48px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.game-tile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.game-tile-body strong {
+  font-size: 18px;
+  font-weight: 700;
+}
+.game-tile-body span {
+  font-size: 13px;
+  color: var(--text-dim);
+}
 
 .btn-group { display: flex; flex-direction: column; gap: 10px; }
 
@@ -986,3 +1052,95 @@ a { color: var(--accent); text-decoration: none; }
   color: var(--text-dim);
   font-size: 15px;
 }
+
+/* ── SEQUENCES GAME ─────────────────────────────────────────────────────── */
+
+/* Q counter in top bar */
+.seq-q-counter {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+/* Sequence term row */
+.seq-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 4px 0;
+  width: 100%;
+}
+
+/* Individual term box */
+.seq-term-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface2);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 20px;
+  font-weight: 700;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The "?" blank box */
+.seq-blank-box {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* ── LETTER KEYBOARD ────────────────────────────────────────────────────── */
+.letter-keyboard {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.letter-key {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.letter-key:active {
+  background: var(--surface2);
+  border-color: var(--accent);
+}
+
+/* ⌫ and ✓ control keys */
+.letter-key-ctrl {
+  background: var(--surface2);
+  color: var(--text-dim);
+}
+.letter-key-submit {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+}
+.letter-key-submit:active { opacity: .85; }

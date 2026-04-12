@@ -6,7 +6,11 @@ Read this file at the start of every session before making any changes. It provi
 
 ## Project Overview
 
-MindMath Trainer is a Flask-based mental arithmetic web app designed to run as a Progressive Web App (PWA) on an iPhone (Safari → Add to Home Screen). It is served locally from a Windows machine on the home network (host `0.0.0.0`, port 5000), accessible from the iPhone via the machine's local IP address, and also deployable to cloud platforms (Render, Railway) via a Procfile. The app trains users for Optiver-style mental arithmetic tests with two game modes: an adaptive open practice mode and a timed multiple-choice test mode.
+MindMath Trainer is a Flask-based multi-game PWA designed to run on an iPhone (Safari → Add to Home Screen). It is served locally from a Windows machine on the home network (host `0.0.0.0`, port 5000) and is also deployable to cloud platforms (Render, Railway) via a Procfile.
+
+The app currently has two games, accessible from a game-launcher home screen at `/`:
+- **Mental Arithmetic** — Optiver-style arithmetic training with Open Practice (adaptive, untimed) and Test Mode (80 questions, 8 min, MC). Five question categories across 4 difficulty levels.
+- **Sequences** — Number and letter pattern sequences across four difficulty levels. Practice-only (no timed test mode yet). Supports Multiple Choice and Open Answer (numpad for numbers, A–Z keyboard for letters).
 
 ---
 
@@ -31,8 +35,9 @@ MindMath Trainer is a Flask-based mental arithmetic web app designed to run as a
 mental-math-trainer/
 ├── app.py                  Main Flask app: all routes, session logic, answer validation helpers
 ├── config.py               Constants: difficulty params, timing, scoring thresholds, TEST_DISTRIBUTION
-├── question_engine.py      All question generation: 5 categories × 4 difficulties, multiple-choice attachment
-├── scoring.py              Post-session stats computation for both modes
+├── question_engine.py      Arithmetic question generation: 5 categories × 4 difficulties, MC attachment
+├── sequence_engine.py      Sequence generation: 4 difficulties, number + letter types, MC distractor attachment
+├── scoring.py              Post-session stats computation for arithmetic modes
 ├── requirements.txt        Flask, gunicorn
 ├── Procfile                web: gunicorn app:app
 ├── CLAUDE.md               This file — architecture reference
@@ -45,12 +50,16 @@ mental-math-trainer/
 │   ├── icon-192.png        PWA icon 192×192
 │   └── icon-512.png        PWA icon 512×512
 └── templates/
-    ├── base.html           Base template: PWA meta tags, manifest link, stylesheet, deferred app.js
-    ├── home.html           Home screen: mode selector, difficulty grid, settings card, start form
-    ├── practice.html       Open Practice screen: timer, question card, open/MC answer area, feedback overlay
-    ├── test.html           Test Mode screen: global timer, MC options, progress bar, quit button
-    ├── results.html        Results screen: score, per-category breakdown (shared for both modes)
-    └── flags.html          Flagged questions viewer (/flags)
+    ├── base.html               Base template: PWA meta tags, manifest link, stylesheet, deferred app.js
+    ├── home.html               Game launcher — tile selector for all games (/)
+    ├── arithmetic.html         Arithmetic game settings page (/arithmetic) — mode, difficulty, timer, format
+    ├── practice.html           Open Practice screen: timer, question card, open/MC answer area, feedback overlay
+    ├── test.html               Test Mode screen: global timer, MC options, progress bar, quit button
+    ├── results.html            Arithmetic results: score, per-category breakdown (shared for both arithmetic modes)
+    ├── sequence_home.html      Sequences game settings page (/sequences) — difficulty, answer format
+    ├── sequence.html           Sequences game screen (/sequences/play) — term boxes, numpad or A-Z keyboard
+    ├── sequence_results.html   Sequences results: stats, by-type breakdown, question log
+    └── flags.html              Flagged questions viewer (/flags)
 ```
 
 ---
@@ -61,7 +70,7 @@ These decisions are intentional and must not be undone without explicit instruct
 
 - **No database** — session stats are in-memory only (lost on session end). Flagged questions write to `flagged_questions.json` (append-only, one JSON array).
 - **Flask server-side sessions** hold all game state: current question, streaks, level modifier, stats, test questions array. No client-side persistence.
-- **Question transitions via AJAX** — no full page reloads during a session (`/next-question`, `/submit-answer`, `/end-session`, `/end-test` are all JSON endpoints).
+- **Question transitions via AJAX** — no full page reloads during a session (`/next-question`, `/submit-answer`, `/end-session`, `/end-test` are all JSON endpoints). Same pattern applies to sequences (`/sequences/next`, `/sequences/submit`, `/sequences/end`).
 - **`viewport-fit=cover`** is set in the viewport meta tag to enable `env(safe-area-inset-top/bottom)` for iPhone safe area insets (Dynamic Island, notch, home indicator).
 - **`session['question_log']`** is initialised as `[]` at session start for both modes. In Practice Mode, every `/submit-answer` call appends one entry. In Test Mode, the full log is built in `/end-test` from `test_questions` + `chosen_answers`. The log is passed to `results.html` as the `question_log` template variable.
 - **Question pre-validation**: all questions served through `get_validated_question()` in `question_engine.py` which applies a 7-point check (finite answer, display parses close to answer, no duplicate MC options, text non-empty with operator, etc.). Retries up to 50 times; falls back to Easy with a `stderr` warning if max attempts exceeded.
@@ -72,6 +81,10 @@ These decisions are intentional and must not be undone without explicit instruct
 - **Adaptive difficulty** applies only to Open Practice, not Test Mode — `level_modifier` shifts question complexity within the selected difficulty tier.
 - **Open Answer input uses a custom on-screen numpad** — digits, `.`, `/` keys arranged in a 4×3 grid. Native iPhone keyboard is never triggered in Open Answer mode. Fraction entry (e.g. `3/4`) is supported natively.
 - **Rounding tolerance is repeating-decimal-only** — `is_repeating()` uses `Fraction.limit_denominator(10000)` to detect mathematically repeating decimals. Only those get the 0.005 absolute tolerance; terminating decimals (0.375, 0.25, etc.) require exact entry.
+- **Home screen is a game launcher at `/`**. Each game lives under its own URL namespace (`/arithmetic`, `/sequences`). Future games add tiles to home.html and new route namespaces.
+- **Sequences game uses session keys prefixed with `seq_`** — `seq_difficulty`, `seq_answer_mode`, `seq_stats`, `seq_current`, `seq_question_log`, `seq_results` — to avoid collision with arithmetic session keys.
+- **Letter keyboard is a custom A–Z grid** (4 rows × 7 columns) in `sequence.html`. Native keyboard is never triggered for letter sequences.
+- **Sequence answers are always exact** — `_check_sequence_answer()` uses string equality (case-insensitive) or numeric tolerance of 0.001. No repeating-decimal tolerance is applied.
 
 ---
 
@@ -128,6 +141,61 @@ Constraints: all 4 options distinct within 0.001; no distractor >9× or <0.111×
 - No mid-test feedback — answer chosen immediately advances to next question.
 - Test ends when all questions answered or timer expires → `/end-test` POST → redirects to `/results`.
 - Quit button always visible; shows inline confirmation before clearing session.
+
+---
+
+## Sequences Game
+
+### Route Map
+
+| Method | URL | Description |
+|---|---|---|
+| GET | `/sequences` | Settings page (`sequence_home.html`) |
+| POST | `/sequences/start` | Init session, redirect to `/sequences/play` |
+| GET | `/sequences/play` | Game screen (`sequence.html`) |
+| POST | `/sequences/next` | AJAX — generate next question, returns JSON |
+| POST | `/sequences/submit` | AJAX — validate answer, update stats, returns `{result, correct_answer}` |
+| POST | `/sequences/end` | Finalise stats, redirect to `/sequences/results` |
+| GET | `/sequences/results` | Results screen (`sequence_results.html`) |
+
+### Sequence Types by Difficulty
+
+| Difficulty | Number types | Letter types |
+|---|---|---|
+| Easy | `arithmetic` (d ±1–5), `geometric_x2` / `geometric_div2` | `alphabet_step` (+1, +2, −1) |
+| Medium | `arithmetic` (d ±5–20), `geometric_x3/x4/div3`, `squares`, `triangular` | `alternating` (+2+3), `alphabet_step` (−2), `alternating` (two interleaved) |
+| Normal | `fibonacci`, `alternating` (interleaved), `increasing_differences`, `arithmetic` (crosses zero) | `positional` (increasing gaps), `two_letter` (AB,CD,EF pairs) |
+| Hard | `diff_of_diffs` (2nd-order), `alternating_op` (×m +a), `power_offset` (2^n+c), `mixed_geom_arith` | `alphabet_wrap` (+3/4/5 with mod 26), `complex_positional` (irregular gaps) |
+
+### Blank Position Rules
+
+| Difficulty | Blank positions |
+|---|---|
+| Easy | Always last |
+| Medium | Last or second-to-last |
+| Normal | Any position except first |
+| Hard | Any position including first |
+
+### Session Keys
+
+| Key | Type | Description |
+|---|---|---|
+| `seq_difficulty` | str | `easy` \| `medium` \| `normal` \| `hard` |
+| `seq_answer_mode` | str | `mc` \| `open` |
+| `seq_stats` | dict | `{total, correct, wrong, skipped, total_time, by_type}` |
+| `seq_current` | dict | Current question dict from `get_sequence_question()` |
+| `seq_question_log` | list | List of log entry dicts (appended per answer) |
+| `seq_results` | dict | Computed at `/sequences/end`, passed to results template |
+
+### Letter Keyboard Layout
+
+```
+A  B  C  D  E  F  G
+H  I  J  K  L  M  N
+O  P  Q  R  S  T  U
+V  W  X  Y  Z  ⌫  ✓
+```
+7 columns × 4 rows. For `two_letter` sequence types, allows 2-char input. All other letter types allow max 1 char. `⌫` clears the entire field; `✓` submits.
 
 ---
 
@@ -284,6 +352,18 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-04-11]** — Session 7: game launcher redesign + Sequences game:
+  1. **Game launcher home screen** — `/` now renders `home.html` as a clean tile launcher with two game tiles (Mental Arithmetic → `/arithmetic`, Sequences → `/sequences`). All arithmetic settings (mode, difficulty, timer, answer format, Start button) moved to new `arithmetic.html` template at `/arithmetic` GET route, with "← Back" link. The `/start` POST route is unchanged.
+  2. **Sequences game** — complete new standalone game with:
+     - `sequence_engine.py`: generates number + letter sequences at 4 difficulty levels (Easy/Medium/Normal/Hard). 14 distinct sequence types total. `get_sequence_question(difficulty, rng)` → dict. `attach_sequence_options(q, rng)` for MC mode. 30-attempt retry loop with Easy fallback.
+     - Routes: `GET /sequences`, `POST /sequences/start`, `GET /sequences/play`, `POST /sequences/next`, `POST /sequences/submit`, `POST /sequences/end`, `GET /sequences/results`.
+     - Templates: `sequence_home.html` (settings), `sequence.html` (game screen), `sequence_results.html` (results + by-type breakdown).
+     - Answer modes: MC (4 shuffled options) or Open Answer (numpad for numbers, custom A–Z 4×7 keyboard for letters).
+     - Sequence display: row of `.seq-term-box` pills; blank shown as `.seq-blank-box` in accent colour.
+     - Stats tracked: total, correct, wrong, skipped, total_time, by_type. Session keys prefixed `seq_`.
+  3. **CSS additions**: `.game-tile` (launcher tiles), `.seq-term-box`, `.seq-blank-box`, `.seq-row`, `.letter-keyboard`, `.letter-key`, `.letter-key-ctrl`, `.letter-key-submit`, `.seq-q-counter`. `.seq-screen` added to the locked-viewport selector.
+  4. **CLAUDE.md**: updated Project Overview, File Map, Architecture Decisions; added Sequences Game section.
 
 - **[2026-04-09]** — Session 6: touch latency follow-up — converted remaining onclick buttons to touchend:
   - `home.html` Start button: `type="submit"` → `type="button"` (id `start-btn`); touchend + timestamp-guarded click fallback calls `form.submit()`.

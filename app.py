@@ -20,6 +20,7 @@ from config import (CATEGORIES, TEST_QUESTIONS, TEST_DURATION,
                     CORRECT_STREAK_FOR_UPGRADE, WRONG_STREAK_FOR_DOWNGRADE)
 from question_engine import get_validated_question, generate_test_questions
 from scoring import compute_practice_stats, compute_test_stats
+from sequence_engine import get_sequence_question, attach_sequence_options
 
 app = Flask(__name__)
 
@@ -37,11 +38,18 @@ else:
 FLAGGED_FILE = os.path.join(os.path.dirname(__file__), 'flagged_questions.json')
 
 
-# ─── home ─────────────────────────────────────────────────────────────────────
+# ─── home (game launcher) ─────────────────────────────────────────────────────
 
 @app.route('/')
 def home():
     return render_template('home.html')
+
+
+# ─── arithmetic settings ──────────────────────────────────────────────────────
+
+@app.route('/arithmetic')
+def arithmetic():
+    return render_template('arithmetic.html')
 
 
 # ─── session start ────────────────────────────────────────────────────────────
@@ -366,6 +374,159 @@ def flags():
     return render_template('flags.html', flags=data)
 
 
+# ─── sequences ────────────────────────────────────────────────────────────────
+
+@app.route('/sequences')
+def sequences():
+    return render_template('sequence_home.html')
+
+
+@app.route('/sequences/start', methods=['POST'])
+def sequences_start():
+    difficulty = request.form.get('difficulty', 'normal')
+    answer_mode = request.form.get('answer_mode', 'mc')
+
+    session['seq_difficulty'] = difficulty
+    session['seq_answer_mode'] = answer_mode
+    session['seq_stats'] = {
+        'total': 0, 'correct': 0, 'wrong': 0, 'skipped': 0,
+        'total_time': 0.0, 'by_type': {},
+    }
+    session['seq_question_log'] = []
+    session['seq_current'] = _next_seq_question()
+    session.modified = True
+    return redirect(url_for('sequences_play'))
+
+
+@app.route('/sequences/play')
+def sequences_play():
+    if 'seq_current' not in session:
+        return redirect(url_for('sequences'))
+    return render_template(
+        'sequence.html',
+        question=session['seq_current'],
+        stats=session.get('seq_stats', {}),
+        difficulty=session.get('seq_difficulty', 'normal'),
+        answer_mode=session.get('seq_answer_mode', 'mc'),
+    )
+
+
+@app.route('/sequences/next', methods=['POST'])
+def sequences_next():
+    if 'seq_difficulty' not in session:
+        return jsonify({'error': 'no active sequence session'}), 400
+    q = _next_seq_question()
+    session['seq_current'] = q
+    session.modified = True
+    return jsonify(q)
+
+
+@app.route('/sequences/submit', methods=['POST'])
+def sequences_submit():
+    if 'seq_difficulty' not in session:
+        return jsonify({'error': 'no active sequence session'}), 400
+
+    data = request.get_json(force=True)
+    skipped = bool(data.get('skipped', False))
+    time_taken = float(data.get('time_taken', 0))
+
+    current_q = session.get('seq_current', {})
+    correct_answer = current_q.get('answer', '')
+    seq_type = current_q.get('sequence_type', 'unknown')
+    seq_display = current_q.get('sequence_display', [])
+
+    stats = session.get('seq_stats', {})
+    by_type = stats.setdefault('by_type', {})
+
+    stats['total'] = stats.get('total', 0) + 1
+
+    if skipped:
+        stats['skipped'] = stats.get('skipped', 0) + 1
+        result = 'skipped'
+        log_user_answer = '—'
+    else:
+        mc_selected = data.get('mc_selected_index')
+        mc_correct = data.get('mc_correct_index')
+        if mc_selected is not None and mc_correct is not None:
+            is_correct = (int(mc_selected) == int(mc_correct))
+            options = current_q.get('options', [])
+            log_user_answer = (options[int(mc_selected)]
+                               if int(mc_selected) < len(options)
+                               else str(mc_selected))
+        else:
+            user_ans = str(data.get('user_answer', '')).strip()
+            is_correct = _check_sequence_answer(user_ans, correct_answer)
+            log_user_answer = user_ans if user_ans else '—'
+
+        stats['total_time'] = stats.get('total_time', 0.0) + time_taken
+
+        if is_correct:
+            stats['correct'] = stats.get('correct', 0) + 1
+            result = 'correct'
+        else:
+            stats['wrong'] = stats.get('wrong', 0) + 1
+            result = 'wrong'
+
+        # Track by sequence type (only non-skipped answers)
+        if seq_type not in by_type:
+            by_type[seq_type] = [0, 0]
+        by_type[seq_type][0] += 1
+        if is_correct:
+            by_type[seq_type][1] += 1
+
+    session['seq_stats'] = stats
+
+    # Append to question log
+    q_log = session.get('seq_question_log', [])
+    q_log.append({
+        'number': stats.get('total', 0),
+        'sequence_display': seq_display,
+        'sequence_type': seq_type,
+        'category': current_q.get('category', ''),
+        'user_answer': log_user_answer,
+        'correct_answer': correct_answer,
+        'result': result,
+        'time_taken': round(time_taken, 1) if not skipped else None,
+    })
+    session['seq_question_log'] = q_log
+    session.modified = True
+
+    return jsonify({'result': result, 'correct_answer': correct_answer})
+
+
+@app.route('/sequences/end', methods=['POST'])
+def sequences_end():
+    stats = session.get('seq_stats', {})
+    total = stats.get('total', 0)
+    answered = total - stats.get('skipped', 0)
+    total_time = stats.get('total_time', 0.0)
+    avg_time = round(total_time / answered, 1) if answered > 0 else None
+
+    session['seq_results'] = {
+        'total': total,
+        'correct': stats.get('correct', 0),
+        'wrong': stats.get('wrong', 0),
+        'skipped': stats.get('skipped', 0),
+        'avg_time': avg_time,
+        'by_type': stats.get('by_type', {}),
+        'difficulty': session.get('seq_difficulty', 'normal'),
+        'answer_mode': session.get('seq_answer_mode', 'mc'),
+    }
+    session.modified = True
+    return jsonify({'redirect': url_for('sequences_results')})
+
+
+@app.route('/sequences/results')
+def sequences_results():
+    if 'seq_results' not in session:
+        return redirect(url_for('sequences'))
+    return render_template(
+        'sequence_results.html',
+        results=session.get('seq_results', {}),
+        question_log=session.get('seq_question_log', []),
+    )
+
+
 # ─── internal helpers ─────────────────────────────────────────────────────────
 
 def _next_practice_question():
@@ -454,6 +615,29 @@ def _check_answer(user: str, correct) -> dict:
 def _answers_match(user: str, correct) -> bool:
     """Tolerant numeric comparison (used by test mode)."""
     return _check_answer(user, correct)['correct']
+
+
+def _next_seq_question() -> dict:
+    """Generate a sequence question (with MC options if needed)."""
+    difficulty = session.get('seq_difficulty', 'normal')
+    answer_mode = session.get('seq_answer_mode', 'mc')
+    rng = random.Random()
+    q = get_sequence_question(difficulty, rng)
+    if answer_mode == 'mc':
+        q = attach_sequence_options(q, rng)
+    return q
+
+
+def _check_sequence_answer(user: str, correct: str) -> bool:
+    """Exact match for sequence answers — no repeating-decimal tolerance."""
+    user = user.strip().upper()
+    correct = correct.strip().upper()
+    if user == correct:
+        return True
+    try:
+        return abs(float(user) - float(correct)) < 0.001
+    except (ValueError, TypeError):
+        return False
 
 
 if __name__ == '__main__':

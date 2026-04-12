@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Mental Arithmetic – MindMath{% endblock %}
+{% block body %}
+<div class="screen home-screen">
+  <header class="home-header">
+    <a href="/" class="back-link">← Back</a>
+    <div class="logo">×</div>
+    <h1>Mental Arithmetic</h1>
+    <p class="subtitle">Practice &amp; Test Mode</p>
+  </header>
+
+  <form method="POST" action="/start" id="startForm">
+    <!-- Mode selection -->
+    <section class="card">
+      <h2>Mode</h2>
+      <div class="btn-group" role="group">
+        <label class="mode-btn" id="label-practice">
+          <input type="radio" name="mode" value="practice" checked>
+          <span>
+            <strong>Open Practice</strong>
+            <small>Continuous · Adaptive difficulty</small>
+          </span>
+        </label>
+        <label class="mode-btn" id="label-test">
+          <input type="radio" name="mode" value="test">
+          <span>
+            <strong>Test Mode</strong>
+            <small>80 questions · 8 minutes · Multiple choice</small>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Difficulty selection (2×2 grid) -->
+    <section class="card">
+      <h2>Difficulty</h2>
+      <div class="diff-grid" role="group">
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="easy">
+          <span>
+            <strong>Easy</strong>
+            <small>Operands 2–20</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="medium">
+          <span>
+            <strong>Medium</strong>
+            <small>2-digit ops</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="normal" checked>
+          <span>
+            <strong>Normal</strong>
+            <small>Optiver-realistic</small>
+          </span>
+        </label>
+        <label class="diff-btn">
+          <input type="radio" name="difficulty" value="hard">
+          <span>
+            <strong>Hard</strong>
+            <small>Complex chains</small>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Settings card -->
+    <section class="card settings-card">
+      <h2>Settings</h2>
+
+      <!-- Timer duration (practice only) -->
+      <div class="setting-row" id="timer-row">
+        <span class="setting-label">Time per question</span>
+        <div class="seg-group" role="group">
+          <label class="seg-btn selected">
+            <input type="radio" name="timer_duration" value="10" checked>10s
+          </label>
+          <label class="seg-btn">
+            <input type="radio" name="timer_duration" value="15">15s
+          </label>
+          <label class="seg-btn">
+            <input type="radio" name="timer_duration" value="20">20s
+          </label>
+          <label class="seg-btn">
+            <input type="radio" name="timer_duration" value="unlimited">&#x221e;
+          </label>
+        </div>
+        <p class="setting-note" id="timer-note" style="display:none">
+          Test mode uses a fixed 8-minute total timer.
+        </p>
+      </div>
+
+      <!-- Answer format (practice only) -->
+      <div class="setting-row" id="answer-mode-row">
+        <span class="setting-label">Answer format</span>
+        <div class="seg-group" role="group">
+          <label class="seg-btn selected">
+            <input type="radio" name="answer_mode" value="open" checked>Open Answer
+          </label>
+          <label class="seg-btn">
+            <input type="radio" name="answer_mode" value="mc">Multiple Choice
+          </label>
+        </div>
+        <p class="setting-note" id="answer-mode-note" style="display:none">
+          Test mode always uses multiple choice.
+        </p>
+      </div>
+    </section>
+
+    <button type="button" class="btn-primary btn-start" id="start-btn">Start</button>
+  </form>
+
+  <footer class="home-footer">
+    <a href="/flags" class="link-dim">Review flagged questions →</a>
+  </footer>
+</div>
+
+<script>
+  // Highlight selected radio button groups
+  document.querySelectorAll('input[type="radio"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      var name = this.getAttribute('name');
+      document.querySelectorAll('input[name="' + name + '"]').forEach(function(r) {
+        r.closest('label').classList.remove('selected');
+      });
+      this.closest('label').classList.add('selected');
+    });
+    if (radio.checked) radio.closest('label').classList.add('selected');
+  });
+
+  // Mode change: toggle practice-only settings visibility
+  function updateSettingsForMode(mode) {
+    var isTest = mode === 'test';
+    var timerRow = document.getElementById('timer-row');
+    var timerNote = document.getElementById('timer-note');
+    var amRow = document.getElementById('answer-mode-row');
+    var amNote = document.getElementById('answer-mode-note');
+    var amInputs = document.querySelectorAll('input[name="answer_mode"]');
+    var timerInputs = document.querySelectorAll('input[name="timer_duration"]');
+
+    if (isTest) {
+      timerRow.classList.add('disabled-row');
+      timerNote.style.display = 'block';
+      amRow.classList.add('disabled-row');
+      amNote.style.display = 'block';
+      amInputs.forEach(function(i) { i.disabled = true; });
+      timerInputs.forEach(function(i) { i.disabled = true; });
+    } else {
+      timerRow.classList.remove('disabled-row');
+      timerNote.style.display = 'none';
+      amRow.classList.remove('disabled-row');
+      amNote.style.display = 'none';
+      amInputs.forEach(function(i) { i.disabled = false; });
+      timerInputs.forEach(function(i) { i.disabled = false; });
+    }
+  }
+
+  document.querySelectorAll('input[name="mode"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      updateSettingsForMode(this.value);
+    });
+  });
+
+  var checkedMode = document.querySelector('input[name="mode"]:checked');
+  if (checkedMode) updateSettingsForMode(checkedMode.value);
+
+  // Start button: touchend at finger-lift, timestamp guard prevents double-fire
+  (function() {
+    var btn = document.getElementById('start-btn');
+    var lastTouch = 0;
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      lastTouch = Date.now();
+      document.getElementById('startForm').submit();
+    }, { passive: false });
+    btn.addEventListener('click', function() {
+      if (Date.now() - lastTouch < 600) return;
+      document.getElementById('startForm').submit();
+    });
+  })();
+</script>
+{% endblock %}

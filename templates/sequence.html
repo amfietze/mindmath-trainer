@@ -1,0 +1,422 @@
+{% extends "base.html" %}
+{% block title %}Sequences – MindMath{% endblock %}
+{% block body %}
+<div class="screen seq-screen">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div class="stat-mini">
+      <span id="stat-correct">{{ stats.correct }}</span> ✓
+      <span id="stat-wrong" style="margin-left:12px">{{ stats.wrong }}</span> ✗
+    </div>
+    <div class="seq-q-counter" id="q-counter">Q {{ stats.total + 1 }}</div>
+    <div class="top-bar-actions">
+      <button id="flag-btn" class="btn-pause">🚩</button>
+      <button id="end-btn" class="btn-end">End</button>
+    </div>
+  </div>
+
+  <!-- QUESTION ZONE -->
+  <div class="middle-zone">
+    <div class="question-card" id="question-card">
+      <div class="seq-row" id="seq-row">
+        {% for term in question.sequence_display %}
+          <div class="seq-term-box{% if term == '?' %} seq-blank-box{% endif %}">{{ term }}</div>
+        {% endfor %}
+      </div>
+      <div class="question-category" id="seq-type-label">
+        {{ 'NUMBER SEQUENCE' if question.category == 'number_sequence' else 'LETTER SEQUENCE' }}
+      </div>
+    </div>
+    <!-- Feedback overlay -->
+    <div class="feedback-overlay" id="feedback-overlay" style="display:none">
+      <div class="feedback-icon" id="feedback-icon"></div>
+      <div class="feedback-text" id="feedback-text"></div>
+      <div class="feedback-answer" id="feedback-answer"></div>
+    </div>
+  </div>
+
+  <!-- ANSWER ZONE -->
+  <div class="bottom-zone" id="bottom-zone">
+
+    <!-- MC mode -->
+    <div class="options-grid" id="mc-zone" style="display:none"></div>
+
+    <!-- Open: number numpad -->
+    <div id="number-zone" style="display:none; flex-direction:column; flex:1; gap:6px; min-height:0;">
+      <div class="numpad-display empty" id="numpad-display">Your answer</div>
+      <div class="numpad-wrap">
+        <div class="numpad-grid">
+          <button class="numpad-key" ontouchstart="seqNumKey('7',event)" onclick="seqNumAppend('7')">7</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('8',event)" onclick="seqNumAppend('8')">8</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('9',event)" onclick="seqNumAppend('9')">9</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('4',event)" onclick="seqNumAppend('4')">4</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('5',event)" onclick="seqNumAppend('5')">5</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('6',event)" onclick="seqNumAppend('6')">6</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('1',event)" onclick="seqNumAppend('1')">1</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('2',event)" onclick="seqNumAppend('2')">2</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('3',event)" onclick="seqNumAppend('3')">3</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('.',event)" onclick="seqNumAppend('.')">.</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('0',event)" onclick="seqNumAppend('0')">0</button>
+          <button class="numpad-key" ontouchstart="seqNumKey('-',event)" onclick="seqNumAppend('-')">−</button>
+        </div>
+        <div class="numpad-actions">
+          <button class="numpad-backspace" ontouchstart="seqNumBksp(event)" onclick="seqNumBackspace()">⌫</button>
+          <button class="numpad-submit" id="num-submit-btn">✓</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open: letter keyboard -->
+    <div id="letter-zone" style="display:none; flex-direction:column; flex:1; gap:6px; min-height:0;">
+      <div class="numpad-display empty" id="letter-display">?</div>
+      <div class="letter-keyboard">
+        {% for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' %}
+          <button class="letter-key" ontouchstart="seqLetterKey('{{ ch }}',event)" onclick="seqLetterAppend('{{ ch }}')">{{ ch }}</button>
+        {% endfor %}
+        <button class="letter-key letter-key-ctrl" ontouchstart="seqLetterBksp(event)" onclick="seqLetterClear()">⌫</button>
+        <button class="letter-key letter-key-ctrl letter-key-submit" id="letter-submit-btn">✓</button>
+      </div>
+    </div>
+
+    <button class="btn-skip" id="skip-btn" ontouchstart="seqSkipTap(event)" onclick="seqSkip()">Skip</button>
+  </div>
+
+</div>
+
+<!-- Flag modal -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
+<div class="modal" id="flag-modal" style="display:none">
+  <h3>Flag this question</h3>
+  <div class="modal-question" id="modal-q-text"></div>
+  <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
+  <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
+  <div class="modal-btns">
+    <button class="btn-secondary" onclick="closeFlag()">Cancel</button>
+    <button class="btn-primary" onclick="submitFlag()">Submit Flag</button>
+  </div>
+</div>
+
+<script>
+const DIFFICULTY = "{{ difficulty }}";
+const ANSWER_MODE = "{{ answer_mode }}";
+
+let currentQ = {{ question | tojson }};
+let statsCorrect = {{ stats.correct }};
+let statsWrong = {{ stats.wrong }};
+let statsTotal = {{ stats.total }};
+let awaitingNext = false;
+let questionStartTime = Date.now();
+
+// Input state
+let numInput = '';
+let letterInput = '';
+
+// ── Input mode helper ─────────────────────────────────────────────────────────
+function getInputMode(q) {
+  if (ANSWER_MODE === 'mc') return 'mc';
+  if (q.category === 'letter_sequence') return 'letter';
+  return 'number';
+}
+
+function maxLetterChars(q) {
+  return (q.sequence_type === 'two_letter') ? 2 : 1;
+}
+
+// ── Render helpers ────────────────────────────────────────────────────────────
+function renderSequence(q) {
+  const row = document.getElementById('seq-row');
+  row.innerHTML = '';
+  q.sequence_display.forEach(function(term) {
+    const box = document.createElement('div');
+    box.className = 'seq-term-box' + (term === '?' ? ' seq-blank-box' : '');
+    box.textContent = term;
+    row.appendChild(box);
+  });
+  document.getElementById('seq-type-label').textContent =
+    q.category === 'number_sequence' ? 'NUMBER SEQUENCE' : 'LETTER SEQUENCE';
+  statsTotal++;
+  document.getElementById('q-counter').textContent = 'Q ' + statsTotal;
+}
+
+function renderAnswerZone(q) {
+  const mode = getInputMode(q);
+  const mcZone     = document.getElementById('mc-zone');
+  const numZone    = document.getElementById('number-zone');
+  const letZone    = document.getElementById('letter-zone');
+
+  mcZone.style.display  = mode === 'mc'     ? 'flex'   : 'none';
+  numZone.style.display = mode === 'number' ? 'flex'   : 'none';
+  letZone.style.display = mode === 'letter' ? 'flex'   : 'none';
+  // Restore bottom zone visibility after feedback
+  document.getElementById('bottom-zone').style.display = 'flex';
+
+  if (mode === 'mc') {
+    mcZone.innerHTML = '';
+    (q.options || []).forEach(function(opt, i) {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn';
+      btn.textContent = opt;
+      btn.addEventListener('touchstart', function(e) { e.preventDefault(); submitMC(i); }, {passive:false});
+      btn.onclick = function() { submitMC(i); };
+      mcZone.appendChild(btn);
+    });
+  } else if (mode === 'number') {
+    numInput = '';
+    updateNumpadDisplay();
+  } else {
+    letterInput = '';
+    updateLetterDisplay();
+  }
+}
+
+// ── Numpad ────────────────────────────────────────────────────────────────────
+function updateNumpadDisplay() {
+  const el = document.getElementById('numpad-display');
+  if (!el) return;
+  if (!numInput) {
+    el.textContent = 'Your answer';
+    el.className = 'numpad-display empty';
+    el.style.fontSize = '';
+  } else {
+    el.textContent = numInput;
+    el.className = 'numpad-display has-input';
+    const len = numInput.length;
+    el.style.fontSize = len <= 6 ? '1.8rem' : len <= 8 ? '1.6rem' : '1.2rem';
+  }
+}
+
+function seqNumKey(ch, e) { if (e && e.type === 'touchstart') e.preventDefault(); seqNumAppend(ch); }
+function seqNumBksp(e) { if (e && e.type === 'touchstart') e.preventDefault(); seqNumBackspace(); }
+
+function seqNumAppend(ch) {
+  if (awaitingNext) return;
+  if (ch === '-') {
+    if (numInput !== '') return;
+    numInput = '-';
+  } else if (ch === '.') {
+    if (numInput.includes('.')) return;
+    numInput += ch;
+  } else {
+    numInput += ch;
+  }
+  if (numInput.length > 12) numInput = numInput.slice(0, 12);
+  updateNumpadDisplay();
+}
+
+function seqNumBackspace() {
+  if (awaitingNext) return;
+  numInput = numInput.slice(0, -1);
+  updateNumpadDisplay();
+}
+
+function submitNumpad() {
+  if (awaitingNext) return;
+  const val = numInput.trim();
+  if (!val || val === '-') return;
+  numInput = '';
+  updateNumpadDisplay();
+  doSubmit(val, false);
+}
+
+// ── Letter keyboard ───────────────────────────────────────────────────────────
+function updateLetterDisplay() {
+  const el = document.getElementById('letter-display');
+  if (!el) return;
+  if (!letterInput) {
+    el.textContent = '?';
+    el.className = 'numpad-display empty';
+  } else {
+    el.textContent = letterInput;
+    el.className = 'numpad-display has-input';
+  }
+}
+
+function seqLetterKey(ch, e) { if (e && e.type === 'touchstart') e.preventDefault(); seqLetterAppend(ch); }
+function seqLetterBksp(e) { if (e && e.type === 'touchstart') e.preventDefault(); seqLetterClear(); }
+
+function seqLetterAppend(ch) {
+  if (awaitingNext) return;
+  const max = maxLetterChars(currentQ);
+  if (letterInput.length < max) {
+    letterInput += ch;
+    updateLetterDisplay();
+  }
+}
+
+function seqLetterClear() {
+  if (awaitingNext) return;
+  letterInput = '';
+  updateLetterDisplay();
+}
+
+function submitLetter() {
+  if (awaitingNext) return;
+  const val = letterInput.trim();
+  if (!val) return;
+  letterInput = '';
+  updateLetterDisplay();
+  doSubmit(val, false);
+}
+
+// ── MC ────────────────────────────────────────────────────────────────────────
+function submitMC(optionIndex) {
+  if (awaitingNext) return;
+  const elapsed = (Date.now() - questionStartTime) / 1000;
+  awaitingNext = true;
+  fetch('/sequences/submit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      mc_selected_index: optionIndex,
+      mc_correct_index: currentQ.correct_index,
+      time_taken: elapsed,
+      skipped: false,
+    })
+  })
+  .then(r => r.json())
+  .then(data => showFeedback(data))
+  .catch(() => loadNext());
+}
+
+// ── Skip ──────────────────────────────────────────────────────────────────────
+function seqSkipTap(e) { if (e && e.type === 'touchstart') e.preventDefault(); seqSkip(); }
+
+function seqSkip() {
+  if (awaitingNext) return;
+  doSubmit(null, true);
+}
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+function doSubmit(val, skipped) {
+  if (awaitingNext && !skipped) return;
+  awaitingNext = true;
+  const elapsed = (Date.now() - questionStartTime) / 1000;
+  fetch('/sequences/submit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      user_answer: val || '',
+      time_taken: elapsed,
+      skipped: skipped,
+    })
+  })
+  .then(r => r.json())
+  .then(data => showFeedback(data))
+  .catch(() => loadNext());
+}
+
+// ── Feedback ──────────────────────────────────────────────────────────────────
+function showFeedback(data) {
+  const overlay = document.getElementById('feedback-overlay');
+  const icon    = document.getElementById('feedback-icon');
+  const text    = document.getElementById('feedback-text');
+  const ans     = document.getElementById('feedback-answer');
+
+  if (data.result === 'skipped') {
+    icon.textContent = '\u23ed';
+    icon.className = 'feedback-icon skipped';
+    text.textContent = 'Skipped';
+    ans.textContent = 'Answer: ' + data.correct_answer;
+  } else if (data.result === 'correct') {
+    icon.textContent = '\u2713';
+    icon.className = 'feedback-icon correct';
+    text.textContent = 'Correct!';
+    ans.textContent = 'Answer: ' + data.correct_answer;
+    statsCorrect++;
+    document.getElementById('stat-correct').textContent = statsCorrect;
+  } else {
+    icon.textContent = '\u2717';
+    icon.className = 'feedback-icon wrong';
+    text.textContent = 'Wrong';
+    ans.textContent = 'Answer: ' + data.correct_answer;
+    statsWrong++;
+    document.getElementById('stat-wrong').textContent = statsWrong;
+  }
+
+  document.getElementById('bottom-zone').style.display = 'none';
+  overlay.style.display = 'flex';
+
+  setTimeout(loadNext, 1200);
+}
+
+// ── Load next question ────────────────────────────────────────────────────────
+function loadNext() {
+  fetch('/sequences/next', {method: 'POST'})
+    .then(r => r.json())
+    .then(q => {
+      awaitingNext = false;
+      currentQ = q;
+      document.getElementById('feedback-overlay').style.display = 'none';
+      renderSequence(q);
+      renderAnswerZone(q);
+      questionStartTime = Date.now();
+    })
+    .catch(function() { awaitingNext = false; });
+}
+
+// ── End session ───────────────────────────────────────────────────────────────
+function endGame() {
+  fetch('/sequences/end', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => { window.location.href = data.redirect; });
+}
+
+// ── Flag modal ────────────────────────────────────────────────────────────────
+function openFlag() {
+  const seqStr = (currentQ.sequence_display || []).join(', ');
+  document.getElementById('modal-q-text').textContent = seqStr;
+  document.getElementById('modal-q-answer').textContent = currentQ.answer || '';
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
+function closeFlag() {
+  document.getElementById('modal-backdrop').style.display = 'none';
+  document.getElementById('flag-modal').style.display = 'none';
+}
+
+function submitFlag() {
+  const seqStr = (currentQ.sequence_display || []).join(', ');
+  const comment = document.getElementById('flag-comment').value;
+  fetch('/flag', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      game_mode: 'sequences',
+      difficulty: DIFFICULTY,
+      question_text: seqStr,
+      correct_answer: currentQ.answer || '',
+      category: currentQ.category || '',
+      user_comment: comment,
+    })
+  }).then(() => closeFlag());
+}
+
+// ── Touchend bindings (top bar buttons + submit keys) ─────────────────────────
+(function() {
+  function bindBtn(id, fn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var lastTouch = 0;
+    el.addEventListener('touchend', function(e) {
+      e.preventDefault(); lastTouch = Date.now(); fn();
+    }, {passive: false});
+    el.addEventListener('click', function() {
+      if (Date.now() - lastTouch < 600) return; fn();
+    });
+  }
+  bindBtn('flag-btn', openFlag);
+  bindBtn('end-btn', endGame);
+  bindBtn('num-submit-btn', submitNumpad);
+  bindBtn('letter-submit-btn', submitLetter);
+})();
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+(function() {
+  renderAnswerZone(currentQ);
+  questionStartTime = Date.now();
+})();
+</script>
+{% endblock %}

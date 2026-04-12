@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Results – Sequences – MindMath{% endblock %}
+{% block body %}
+<div class="screen">
+  <div class="results-header">
+    <div class="result-badge practice-badge">SEQUENCES</div>
+    <div class="big-score">
+      <span class="score-num">{{ results.correct }}</span>
+      <span class="score-denom">/ {{ results.total }}</span>
+    </div>
+    <div class="score-note">{{ results.difficulty | capitalize }} · {{ results.answer_mode | upper }}</div>
+  </div>
+
+  <!-- Summary stats card -->
+  <div class="card stats-card">
+    <div class="stat-row">
+      <div class="stat-cell correct">
+        <div class="stat-val">{{ results.correct }}</div>
+        <div class="stat-lbl">Correct</div>
+      </div>
+      <div class="stat-cell wrong">
+        <div class="stat-val">{{ results.wrong }}</div>
+        <div class="stat-lbl">Wrong</div>
+      </div>
+      <div class="stat-cell skipped">
+        <div class="stat-val">{{ results.skipped }}</div>
+        <div class="stat-lbl">Skipped</div>
+      </div>
+    </div>
+    <div class="pct-row">
+      {% if results.total > 0 %}
+        <span class="pct correct">{{ (results.correct / results.total * 100) | round | int }}% correct</span>
+        <span class="pct wrong">{{ (results.wrong / results.total * 100) | round | int }}% wrong</span>
+        <span class="pct skipped">{{ (results.skipped / results.total * 100) | round | int }}% skipped</span>
+      {% endif %}
+    </div>
+    {% if results.avg_time is not none %}
+      <div class="avg-time">Avg time per question: {{ results.avg_time }}s</div>
+    {% endif %}
+  </div>
+
+  <!-- Breakdown by sequence type -->
+  {% if results.by_type %}
+  <div class="card">
+    <h2>By Sequence Type</h2>
+    <table class="cat-table">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Answered</th>
+          <th>Correct</th>
+          <th style="text-align:right">Accuracy</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for type_name, counts in results.by_type.items() %}
+        <tr>
+          <td>{{ type_name.replace('_', ' ') | capitalize }}</td>
+          <td>{{ counts[0] }}</td>
+          <td>{{ counts[1] }}</td>
+          <td>
+            <div class="acc-bar-wrap">
+              {% if counts[0] > 0 %}
+                {% set pct = (counts[1] / counts[0] * 100) | round | int %}
+                <div class="acc-bar" style="width:{{ [pct, 100] | min }}px"></div>
+                <span>{{ pct }}%</span>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Question log (collapsible) -->
+  {% if question_log %}
+  <div class="card question-log-section">
+    <div class="question-log-header" onclick="toggleLog(this)">
+      <span>Question Log ({{ question_log | length }} questions)</span>
+      <span class="log-toggle-icon">▼</span>
+    </div>
+    <div class="question-log-body" id="q-log-body" style="display:none">
+      {% for entry in question_log %}
+      <div class="q-log-card q-log-{{ entry.result }}">
+        <div class="q-log-top">
+          <span class="q-log-num">#{{ entry.number }}</span>
+          <span class="q-log-cat">{{ entry.sequence_type.replace('_', ' ') if entry.sequence_type else entry.category }}</span>
+          {% if entry.time_taken is not none %}
+            <span class="q-log-time">{{ entry.time_taken }}s</span>
+          {% endif %}
+        </div>
+        <div class="q-log-text">{{ entry.sequence_display | join(' · ') }}</div>
+        <div class="q-log-result q-log-result-{{ entry.result }}">
+          {% if entry.result == 'correct' %}✓ Correct
+          {% elif entry.result == 'wrong' %}✗ Wrong
+          {% else %}— Skipped{% endif %}
+        </div>
+        <div class="q-log-answers">
+          <span>Your answer: <strong>{{ entry.user_answer }}</strong></span>
+          {% if entry.result != 'correct' %}
+            <span class="q-log-correct-bold">Correct: <strong>{{ entry.correct_answer }}</strong></span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Actions -->
+  <div class="results-actions">
+    <a href="/sequences" class="btn-primary btn-home" style="display:block; text-align:center; text-decoration:none;">Play Again</a>
+  </div>
+  <div style="text-align:center; padding: 8px 0 4px;">
+    <a href="/" class="link-dim">← Home</a>
+  </div>
+</div>
+
+<script>
+function toggleLog(header) {
+  var body = document.getElementById('q-log-body');
+  var icon = header.querySelector('.log-toggle-icon');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    icon.textContent = '▲';
+  } else {
+    body.style.display = 'none';
+    icon.textContent = '▼';
+  }
+}
+</script>
+{% endblock %}
