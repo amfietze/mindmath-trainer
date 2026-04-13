@@ -93,6 +93,27 @@ def _num_double_easy(rng):
     return terms, rule_type, rule
 
 
+def _num_count10_easy(rng):
+    start = rng.choice([10, 20, 30, 40, 50, 60, 70])
+    terms = [start + 10 * i for i in range(5)]
+    rule = "Count up by 10 each step."
+    return terms, 'count_by_10', rule
+
+
+def _num_even_easy(rng):
+    start = rng.choice([2, 4, 6, 8, 10, 12])
+    terms = [start + 2 * i for i in range(5)]
+    rule = "Consecutive even numbers."
+    return terms, 'even_numbers', rule
+
+
+def _num_odd_easy(rng):
+    start = rng.choice([1, 3, 5, 7, 9, 11])
+    terms = [start + 2 * i for i in range(5)]
+    rule = "Consecutive odd numbers."
+    return terms, 'odd_numbers', rule
+
+
 # ─── Number generators — Medium ───────────────────────────────────────────────
 
 def _num_arith_medium(rng):
@@ -177,6 +198,50 @@ def _num_digit_sum_medium(rng):
     return terms, 'digit_sum', rule
 
 
+def _num_pow2_medium(rng):
+    n0 = rng.randint(0, 2)
+    terms = [2 ** (n0 + i) for i in range(6)]
+    rule = "Each term is double the previous (powers of 2)."
+    return terms, 'powers_of_2', rule
+
+
+def _num_pow3_medium(rng):
+    n0 = rng.randint(0, 1)
+    terms = [3 ** (n0 + i) for i in range(5)]
+    rule = "Each term is triple the previous (powers of 3)."
+    return terms, 'powers_of_3', rule
+
+
+def _num_multiples_medium(rng):
+    base = rng.choice([3, 4, 6, 7])
+    start = rng.randint(1, 3)
+    terms = [base * (start + i) for i in range(6)]
+    rule = f"Multiples of {base}."
+    return terms, 'multiples', rule
+
+
+def _num_collatz_medium(rng):
+    # Find a seed that gives 5-6 clean steps without cycling back to 1 too quickly
+    # and without exceeding ~200
+    seeds = [6, 10, 12, 14, 18, 20, 24, 26, 28]
+    seed = rng.choice(seeds)
+    terms = [seed]
+    for _ in range(5):
+        n = terms[-1]
+        if n % 2 == 0:
+            terms.append(n // 2)
+        else:
+            terms.append(3 * n + 1)
+        if len(terms) > 6:
+            break
+    # Ensure we have exactly 6 terms and they're reasonable
+    if len(terms) < 6:
+        terms = [12, 6, 3, 10, 5, 16]
+    terms = terms[:6]
+    rule = "If even, halve it. If odd, multiply by 3 and add 1 (Collatz rule)."
+    return terms, 'collatz', rule
+
+
 # ─── Number generators — Normal ───────────────────────────────────────────────
 
 def _num_fibonacci_normal(rng):
@@ -258,6 +323,36 @@ def _num_cubes_normal(rng):
     terms = [(n0 + i) ** 3 for i in range(5)]
     rule = f"Consecutive cube numbers starting from {n0}³."
     return terms, 'cubes', rule
+
+
+def _num_second_order_normal(rng):
+    start = rng.randint(1, 8)
+    d0 = rng.randint(1, 3)
+    k = rng.randint(1, 2)
+    terms = [start]
+    d = d0
+    for _ in range(6):
+        terms.append(terms[-1] + d)
+        d += k
+    rule = f"Differences between terms increase by {k} each step: {d0}, {d0+k}, {d0+2*k}..."
+    return terms, 'second_order_arithmetic', rule
+
+
+def _num_lucas_normal(rng):
+    # Lucas numbers: 2, 1, 3, 4, 7, 11, 18...
+    terms = [2, 1, 3, 4, 7, 11, 18]
+    # Optionally start a few steps in
+    start = rng.randint(0, 2)
+    terms = terms[start:start + 6]
+    rule = "Each term is the sum of the two preceding terms (Lucas sequence, starting 2, 1)."
+    return terms, 'lucas', rule
+
+
+def _num_catalan_normal(rng):
+    # Catalan numbers: 1, 1, 2, 5, 14, 42
+    terms = [1, 1, 2, 5, 14, 42]
+    rule = "Catalan numbers: 1, 1, 2, 5, 14, 42..."
+    return terms, 'catalan', rule
 
 
 # ─── Number generators — Hard ─────────────────────────────────────────────────
@@ -352,6 +447,51 @@ def _num_digital_root_hard(rng):
         terms = [dr + 9 * i for i in range(5)]
     rule = f"Each term has a digital root of {dr} (repeated digit-sum reduces to {dr})."
     return terms, 'digital_root', rule
+
+
+def _num_recaman_hard(rng):
+    # Recaman sequence: 0, 1, 3, 6, 2, 7, 13, 20, 12, 21...
+    seq = [0]
+    seen = {0}
+    for n in range(1, 11):
+        candidate = seq[-1] - n
+        if candidate > 0 and candidate not in seen:
+            seq.append(candidate)
+        else:
+            seq.append(seq[-1] + n)
+        seen.add(seq[-1])
+    # Use 7 terms, blank at position 6, 7, or 8
+    length = rng.choice([8, 9])
+    terms = seq[:length]
+    rule = "Recaman: subtract n if result is positive and not yet in sequence, else add n."
+    return terms, 'recaman', rule
+
+
+def _num_sylvester_hard(rng):
+    # Sylvester: each term = product of all previous + 1
+    # 2, 3, 7, 43, 1807...
+    terms = [2, 3, 7, 43, 1807]
+    rule = "Each term equals the product of all previous terms, plus 1."
+    return terms, 'sylvester', rule
+
+
+def _num_look_say_hard(rng):
+    # Look-and-say: 1, 11, 21, 1211, 111221, 312211
+    terms = [1, 11, 21, 1211, 111221, 312211]
+    rule = "Describe the previous term digit by digit: count consecutive identical digits."
+    return terms, 'look_and_say', rule
+
+
+def _num_padovan_hard(rng):
+    # Padovan: P(n) = P(n-2) + P(n-3), starts 1,1,1,2,2,3,4,5,7,9,12,16...
+    start = rng.randint(0, 3)
+    full = [1, 1, 1, 2, 2, 3, 4, 5, 7, 9, 12, 16]
+    terms = full[start:start + 8]
+    if len(terms) < 7:
+        terms = [1, 1, 1, 2, 2, 3, 4, 5, 7]
+    terms = terms[:8]
+    rule = "Each term equals the term two steps back plus the term three steps back (Padovan)."
+    return terms, 'padovan', rule
 
 
 # ─── Letter generators — Easy ─────────────────────────────────────────────────
@@ -564,16 +704,22 @@ def _let_modular_hard(rng):
 # ─── Generator registries ──────────────────────────────────────────────────────
 
 _NUM_GEN = {
-    'easy':   [_num_arith_easy, _num_double_easy],
+    'easy':   [_num_arith_easy, _num_double_easy,
+               _num_count10_easy, _num_even_easy, _num_odd_easy],
     'medium': [_num_arith_medium, _num_geom_medium, _num_squares_medium,
                _num_triangular_medium, _num_prime_medium, _num_alt_sign_medium,
-               _num_cumsum_medium, _num_digit_sum_medium],
+               _num_pow2_medium, _num_pow3_medium, _num_multiples_medium,
+               _num_collatz_medium],
     'normal': [_num_fibonacci_normal, _num_alternating_normal, _num_inc_diff_normal,
                _num_arith_neg_normal, _num_geom_alt_sign_normal, _num_square_offset_normal,
-               _num_alt_two_step_normal, _num_cubes_normal],
+               _num_alt_two_step_normal, _num_cubes_normal,
+               _num_second_order_normal, _num_lucas_normal, _num_catalan_normal,
+               _num_cumsum_medium],  # moved from medium: second-order pattern
     'hard':   [_num_diff2_hard, _num_alt_op_hard, _num_power_offset_hard, _num_mixed_hard,
                _num_factorial_hard, _num_recursive_hard, _num_interleaved_geom_hard,
-               _num_digital_root_hard],
+               _num_digital_root_hard, _num_digit_sum_medium,  # moved from medium: conceptually hard
+               _num_recaman_hard, _num_sylvester_hard, _num_look_say_hard,
+               _num_padovan_hard],
 }
 
 _LET_GEN = {
@@ -719,14 +865,45 @@ def attach_sequence_options(q: dict, rng) -> dict:
 
 # ─── Distractor generators ─────────────────────────────────────────────────────
 
+def _is_integer_sequence(q: dict) -> bool:
+    """Return True if ALL non-blank terms in the sequence are integers (no decimal point)."""
+    disp = q.get('sequence_display', [])
+    bp = q.get('blank_position', -1)
+    for i, t in enumerate(disp):
+        if i == bp:
+            continue
+        s = str(t).strip()
+        if '.' in s:
+            return False
+        try:
+            int(s)
+        except ValueError:
+            return False
+    return True
+
+
 def _num_distractors(correct_str: str, q: dict, rng) -> list:
     try:
         cv = float(correct_str)
     except ValueError:
         return [correct_str + '1', correct_str + '2', correct_str + '3']
 
+    force_int = _is_integer_sequence(q)
     seen = {cv}
     result = []
+
+    def _add_candidate(c: float) -> bool:
+        """Format c, deduplicate, and append to result. Returns True if appended."""
+        if force_int:
+            c = round(c)
+            c_key = float(c)
+        else:
+            c_key = c
+        if abs(c_key - cv) > 0.001 and c_key not in seen:
+            seen.add(c_key)
+            result.append(_fmt_num(float(c), cv if not force_int else float(int(cv))))
+            return True
+        return False
 
     # Estimate typical step from visible terms
     disp = q.get('sequence_display', [])
@@ -748,32 +925,26 @@ def _num_distractors(correct_str: str, q: dict, rng) -> list:
             cv + 1, cv - 1,
         ]
         for c in candidates:
-            if abs(c - cv) > 0.001 and c not in seen:
-                seen.add(c)
-                result.append(_fmt_num(c, cv))
-                if len(result) >= 3:
-                    return result
+            if _add_candidate(c) and len(result) >= 3:
+                return result
 
     # Fill with nearby offsets
     for off in rng.sample([-3, -2, -1, 1, 2, 3, -5, 5, -4, 4], 10):
         c = cv + off
-        if abs(c - cv) > 0.001 and c not in seen:
-            seen.add(c)
-            result.append(_fmt_num(c, cv))
-            if len(result) >= 3:
-                return result
+        if _add_candidate(c) and len(result) >= 3:
+            return result
 
     return result[:3]
 
 
 def _fmt_num(val: float, ref: float) -> str:
-    if val == int(val) and ref == int(ref):
+    if val == int(val) and (ref == int(ref) or ref == round(ref)):
         return str(int(val))
     ref_str = str(ref)
     if '.' in ref_str:
         dp = len(ref_str.split('.')[1].rstrip('0')) or 1
         return f"{val:.{dp}f}"
-    return str(val)
+    return str(int(val)) if val == int(val) else str(val)
 
 
 def _letter_distractors(correct: str, rng) -> list:

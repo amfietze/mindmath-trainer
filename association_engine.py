@@ -29,8 +29,8 @@ def load_bank(language: str = 'en') -> list:
         FileNotFoundError: if the question bank file does not exist.
         ValueError: if the language code is unsupported.
     """
-    if language not in ('en', 'de'):
-        raise ValueError(f"Unsupported language '{language}'. Use 'en' or 'de'.")
+    if language not in ('en', 'de', 'fr'):
+        raise ValueError(f"Unsupported language '{language}'. Use 'en', 'de', or 'fr'.")
 
     if language in _BANK_CACHE:
         return _BANK_CACHE[language]

@@ -323,9 +323,51 @@ def end_test():
 def results():
     if session.get('mode') != 'results':
         return redirect(url_for('home'))
+    res = session.get('results', {})
+    # Inject difficulty into results dict for template use (flagging, display)
+    if 'difficulty' not in res:
+        res = dict(res, difficulty=session.get('difficulty', 'normal'))
     return render_template('results.html',
-                           results=session.get('results', {}),
+                           results=res,
                            question_log=session.get('question_log', []))
+
+
+@app.route('/restart', methods=['POST'])
+def restart():
+    """Re-start arithmetic session with the same settings that were used."""
+    prev = session.get('results', {})
+    diff = prev.get('difficulty', session.get('difficulty', 'normal'))
+    mode = prev.get('mode', 'practice')
+    qt = session.get('question_time', PRACTICE_QUESTION_TIME)
+    answer_mode = session.get('answer_mode', 'open')
+
+    session.clear()
+    if mode == 'test':
+        seed = random.randint(0, 999_999)
+        questions = generate_test_questions(seed, diff, TEST_QUESTIONS)
+        session['mode'] = 'test'
+        session['difficulty'] = diff
+        session['seed'] = seed
+        session['test_questions'] = questions
+        session['question_log'] = []
+        session['start_time'] = time.time()
+        return redirect(url_for('test'))
+    else:
+        session['mode'] = 'practice'
+        session['difficulty'] = diff
+        session['level_modifier'] = 0
+        session['correct_streak'] = 0
+        session['wrong_streak'] = 0
+        session['question_time'] = qt
+        session['answer_mode'] = answer_mode
+        session['stats'] = {
+            'total': 0, 'correct': 0, 'wrong': 0, 'skipped': 0,
+            'total_time': 0.0, 'by_category': {cat: [0, 0] for cat in CATEGORIES},
+        }
+        session['question_log'] = []
+        first_q = _next_practice_question()
+        session['current_q'] = first_q
+        return redirect(url_for('practice'))
 
 
 # ─── flagging ─────────────────────────────────────────────────────────────────
@@ -576,6 +618,42 @@ def sequences_results():
         results=session.get('seq_results', {}),
         question_log=session.get('seq_question_log', []),
     )
+
+
+@app.route('/sequences/restart', methods=['POST'])
+def sequences_restart():
+    """Re-start sequences session with the same settings."""
+    prev = session.get('seq_results', {})
+    diff = prev.get('difficulty', session.get('seq_difficulty', 'normal'))
+    mode = prev.get('mode', 'practice')
+    answer_mode = prev.get('answer_mode', session.get('seq_answer_mode', 'mc'))
+
+    if mode == 'test':
+        session['seq_difficulty'] = diff
+        session['seq_mode'] = 'test'
+        session['seq_test_score'] = 0
+        session['seq_test_total'] = 0
+        session['seq_test_correct'] = 0
+        session['seq_test_wrong'] = 0
+        session['seq_test_skipped'] = 0
+        session['seq_question_log'] = []
+        # Clear old results so the test screen guard passes
+        session.pop('seq_results', None)
+        session.modified = True
+        return redirect(url_for('sequences_test'))
+    else:
+        session['seq_difficulty'] = diff
+        session['seq_answer_mode'] = answer_mode
+        session['seq_mode'] = 'practice'
+        session['seq_stats'] = {
+            'total': 0, 'correct': 0, 'wrong': 0, 'skipped': 0,
+            'total_time': 0.0, 'by_type': {},
+        }
+        session['seq_question_log'] = []
+        session['seq_current'] = _next_seq_question()
+        session.pop('seq_results', None)
+        session.modified = True
+        return redirect(url_for('sequences_play'))
 
 
 # ─── sequences test mode ──────────────────────────────────────────────────────
@@ -856,7 +934,7 @@ def associations():
 @app.route('/associations/start', methods=['POST'])
 def associations_start():
     language = request.form.get('language', 'en')
-    if language not in ('en', 'de'):
+    if language not in ('en', 'de', 'fr'):
         language = 'en'
 
     session['assoc_language'] = language
@@ -970,6 +1048,28 @@ def associations_end():
     }
     session.modified = True
     return jsonify({'redirect': url_for('associations_results')})
+
+
+@app.route('/associations/restart', methods=['POST'])
+def associations_restart():
+    """Re-start word associations session with the same language."""
+    prev = session.get('assoc_results', {})
+    language = prev.get('language', session.get('assoc_language', 'en'))
+    if language not in ('en', 'de', 'fr'):
+        language = 'en'
+
+    session['assoc_language'] = language
+    session['assoc_used_ids'] = []
+    session['assoc_stats'] = {'total': 0, 'correct': 0, 'wrong': 0, 'skipped': 0}
+    session['assoc_question_log'] = []
+    session.pop('assoc_results', None)
+
+    rng = random.Random()
+    q = get_association_question(language, rng, exclude_ids=[])
+    session['assoc_current'] = q
+    session['assoc_used_ids'] = [q['id']]
+    session.modified = True
+    return redirect(url_for('associations_play'))
 
 
 @app.route('/associations/results')

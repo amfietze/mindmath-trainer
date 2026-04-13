@@ -5,7 +5,7 @@
 
   <div class="results-header">
     <div class="result-badge practice-badge">
-      WORD ASSOCIATIONS {{ '🇬🇧' if results.language == 'en' else '🇩🇪' }}
+      WORD ASSOCIATIONS {{ '🇬🇧' if results.language == 'en' else ('🇫🇷' if results.language == 'fr' else '🇩🇪') }}
     </div>
     <div class="big-score">
       <span class="score-num">{{ results.correct }}</span>
@@ -85,6 +85,7 @@
     </div>
     <div class="question-log-body" id="q-log-body" style="display:none">
       {% for entry in question_log %}
+      {% set q_text = entry.prompt_a1 + ' : ' + entry.prompt_a2 + ' → ' + entry.prompt_b1 + ' : ___?' %}
       <div class="q-log-card q-log-{{ entry.result }}">
         <div class="q-log-top">
           <span class="q-log-num">#{{ entry.number }}</span>
@@ -92,6 +93,10 @@
           {% if entry.time_taken is not none %}
             <span class="q-log-time">{{ entry.time_taken }}s</span>
           {% endif %}
+          <button class="q-log-flag-btn" onclick="flagFromLog({{ loop.index0 }}, this)"
+            data-q="{{ q_text | e }}"
+            data-a="{{ entry.answer | e }}"
+            data-cat="{{ entry.category | e }}">🚩</button>
         </div>
         <div class="q-log-text assoc-log-analogy">
           <span class="assoc-log-muted">{{ entry.prompt_a1 }} : {{ entry.prompt_a2 }}</span>
@@ -120,15 +125,74 @@
 
   <!-- Actions -->
   <div class="results-actions">
-    <a href="/associations" class="btn-primary btn-home" style="display:block; text-align:center; text-decoration:none;">Play Again</a>
-  </div>
-  <div style="text-align:center; padding: 8px 0 4px;">
-    <a href="/" class="link-dim">← Home</a>
+    <a href="/" class="btn-home" ontouchend="_tap(event,function(){window.location.href='/';})" onclick="_tap(event,function(){window.location.href='/';})">🏠 Home</a>
+    <form method="POST" action="/associations/restart" style="flex:1;display:flex">
+      <button type="submit" class="btn-play-again" style="width:100%">🔄 Play Again</button>
+    </form>
   </div>
 
 </div>
 
+<!-- Flag modal -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlagModal()"></div>
+<div class="modal" id="flag-modal" style="display:none">
+  <h3>Flag this question</h3>
+  <div class="modal-question" id="modal-q-text"></div>
+  <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
+  <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
+  <div class="modal-btns">
+    <button class="btn-secondary" onclick="closeFlagModal()">Cancel</button>
+    <button class="btn-primary" onclick="submitFlagModal()">Submit Flag</button>
+  </div>
+</div>
+
 <script>
+const RESULTS_LANGUAGE = "{{ results.language }}";
+
+var _flagBtn = null;
+var _flagData = null;
+
+function flagFromLog(index, btn) {
+  _flagBtn = btn;
+  _flagData = { q: btn.dataset.q, a: btn.dataset.a, cat: btn.dataset.cat };
+  document.getElementById('modal-q-text').textContent = _flagData.q;
+  document.getElementById('modal-q-answer').textContent = _flagData.a;
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
+function closeFlagModal() {
+  _flagBtn = null; _flagData = null;
+  document.getElementById('modal-backdrop').style.display = 'none';
+  document.getElementById('flag-modal').style.display = 'none';
+}
+
+function submitFlagModal() {
+  if (!_flagData) { closeFlagModal(); return; }
+  var comment = document.getElementById('flag-comment').value;
+  var btn = _flagBtn;
+  fetch('/flag', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      game_mode: 'associations',
+      difficulty: RESULTS_LANGUAGE,
+      question_text: _flagData.q,
+      correct_answer: _flagData.a,
+      category: _flagData.cat,
+      user_comment: comment,
+    })
+  }).then(function() {
+    if (btn) { btn.textContent = '✓ Flagged'; btn.disabled = true; }
+    closeFlagModal();
+  });
+}
+
+function _tap(e, fn) {
+  if (e.type === 'touchend') { e.preventDefault(); e.currentTarget._lt = Date.now(); fn(); }
+  else if (e.type === 'click') { if (e.currentTarget._lt && Date.now() - e.currentTarget._lt < 600) return; fn(); }
+}
 function toggleLog(header) {
   var body = document.getElementById('q-log-body');
   var icon = header.querySelector('.log-toggle-icon');

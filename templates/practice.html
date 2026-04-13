@@ -11,9 +11,7 @@
     </div>
     <div id="timer-display" class="timer">{{ question_time if question_time else '∞' }}</div>
     <div class="top-bar-actions">
-      {% if answer_mode != 'mc' %}
       <button id="pause-btn" class="btn-pause">⏸</button>
-      {% endif %}
       <button id="flag-btn" class="btn-pause">🚩</button>
       <button id="end-btn" class="btn-end">End</button>
     </div>
@@ -72,23 +70,14 @@
     <button class="btn-skip" id="skip-btn" ontouchstart="skipTap(event)" onclick="skipQuestion()">Skip</button>
   </div>
 
-  <!-- Pause overlay (open-answer mode only; position:fixed escapes overflow:hidden) -->
-  {% if answer_mode != 'mc' %}
+  <!-- Pause overlay (position:fixed escapes overflow:hidden) -->
   <div class="pause-overlay" id="pause-overlay" style="display:none">
-    <div class="pause-panel">
-      <div class="pause-header">
-        <span class="pause-title">⏸ Paused</span>
-        <button class="pause-resume-btn" onclick="resumeGame()">▶ Resume</button>
-      </div>
-      <div class="pause-current">
-        <strong>Current question</strong><br>
-        <span id="pause-current-q"></span>
-      </div>
-      <div class="pause-history-label">Last answered</div>
-      <div id="pause-history"></div>
+    <div class="pause-header">
+      <span class="pause-title" id="pause-title">⏸ Paused — Question Log (0 answered)</span>
     </div>
+    <div class="pause-log" id="pause-log"></div>
+    <button class="pause-resume-btn" ontouchend="_tap(event, resumeGame)" onclick="_tap(event, resumeGame)">▶ Resume</button>
   </div>
-  {% endif %}
 
 
 </div>
@@ -129,13 +118,12 @@ let kbInput = '';
 let isPaused = false;
 let frozenTimeLeft = null;
 
-// Recent questions history (max 3, newest first)
-let recentQuestions = [];
+// Session log: all answered questions (newest first)
+let sessionLog = [];
 let lastUserAnswer = '';
 
-// Flag modal state
-let flaggingHistorical = false;
-let historicalFlagIndex = -1;
+// Flag modal state — null = current question; index = sessionLog index
+let flagLogIndex = null;
 
 // ── TIMER ────────────────────────────────────────────────────────────────────
 
@@ -254,8 +242,7 @@ function pauseGame() {
   const btn = document.getElementById('pause-btn');
   if (btn) btn.textContent = '▶';
 
-  document.getElementById('pause-current-q').textContent = currentQuestion.text || '';
-  renderPauseHistory();
+  renderPauseLog();
   document.getElementById('pause-overlay').style.display = 'flex';
 }
 
@@ -286,33 +273,36 @@ function resumeGame() {
   frozenTimeLeft = null;
 }
 
-function renderPauseHistory() {
-  const container = document.getElementById('pause-history');
+function renderPauseLog() {
+  const titleEl = document.getElementById('pause-title');
+  const container = document.getElementById('pause-log');
   if (!container) return;
-  if (!recentQuestions.length) {
+  if (titleEl) titleEl.textContent = '⏸ Paused — Question Log (' + sessionLog.length + ' answered)';
+  if (!sessionLog.length) {
     container.innerHTML = '<div class="pause-empty">No questions answered yet.</div>';
     return;
   }
-  container.innerHTML = recentQuestions.map(function(q, i) {
+  container.innerHTML = sessionLog.map(function(q, i) {
     const icon = q.result === 'correct' ? '✓' : (q.result === 'wrong' ? '✗' : '—');
     const cls  = q.result === 'correct' ? 'correct' : (q.result === 'wrong' ? 'wrong' : 'skipped');
     const userAns = q.user_answer || '—';
-    return '<div class="history-entry">'
-      + '<div class="history-top">'
-      + '<span class="history-icon ' + cls + '">' + icon + '</span>'
-      + '<span class="history-q">' + q.question_text + '</span>'
-      + '<button class="history-flag-btn" id="hflag-' + i + '" onclick="flagHistorical(' + i + ')">🚩</button>'
+    const flaggedAttr = q._flagged ? ' disabled' : '';
+    const flagLabel = q._flagged ? '✓ Flagged' : '🚩';
+    return '<div class="pause-log-entry ' + cls + '">'
+      + '<div class="pause-log-top">'
+      + '<span class="pause-log-meta">#' + q.number + ' &nbsp;' + icon + '</span>'
+      + '<span class="pause-log-q">' + q.question_text + '</span>'
+      + '<button class="pause-log-flag" id="plf-' + i + '"' + flaggedAttr + ' ontouchend="_tap(event,function(){flagFromPauseLog(' + i + ');})" onclick="_tap(event,function(){flagFromPauseLog(' + i + ');})">' + flagLabel + '</button>'
       + '</div>'
-      + '<div class="history-answers">Your: ' + userAns + ' &nbsp;·&nbsp; Answer: ' + q.correct_answer + '</div>'
+      + '<div class="pause-log-answers">Your: ' + userAns + ' &nbsp;·&nbsp; Correct: ' + q.correct_answer + '</div>'
       + '</div>';
   }).join('');
 }
 
-function flagHistorical(i) {
-  const q = recentQuestions[i];
+function flagFromPauseLog(i) {
+  const q = sessionLog[i];
   if (!q) return;
-  flaggingHistorical = true;
-  historicalFlagIndex = i;
+  flagLogIndex = i;
   document.getElementById('modal-q-text').textContent = q.question_text;
   document.getElementById('modal-q-answer').textContent = q.correct_answer;
   document.getElementById('flag-comment').value = '';
@@ -426,15 +416,15 @@ function showFeedback(data, skipped) {
 
   timeEl.textContent = (skipped || data.result === 'skipped') ? '' : data.time_taken + 's';
 
-  // Record in recent-questions history (max 3, newest first)
-  recentQuestions.unshift({
+  // Record in session log (newest first, unlimited)
+  sessionLog.unshift({
+    number: sessionLog.length + 1,
     question_text: currentQuestion.text || '',
     user_answer: lastUserAnswer,
     correct_answer: data.display_answer || '',
     result: (skipped || data.result === 'skipped') ? 'skipped' : data.result,
     category: currentQuestion.category || '',
   });
-  if (recentQuestions.length > 3) recentQuestions.pop();
   lastUserAnswer = '';
 
   // Show overlay over question zone; hide answer zone
@@ -496,8 +486,7 @@ function endSession() {
 // ── FLAG MODAL ────────────────────────────────────────────────────────────────
 
 function openFlag() {
-  flaggingHistorical = false;
-  historicalFlagIndex = -1;
+  flagLogIndex = null;
   document.getElementById('modal-q-text').textContent = currentQuestion.text || '';
   document.getElementById('modal-q-answer').textContent = currentQuestion.display_answer || '';
   document.getElementById('flag-comment').value = '';
@@ -506,8 +495,7 @@ function openFlag() {
 }
 
 function closeFlag() {
-  flaggingHistorical = false;
-  historicalFlagIndex = -1;
+  flagLogIndex = null;
   document.getElementById('modal-backdrop').style.display = 'none';
   document.getElementById('flag-modal').style.display = 'none';
 }
@@ -515,15 +503,16 @@ function closeFlag() {
 function submitFlag() {
   let q_text, q_answer, q_category;
 
-  if (flaggingHistorical && historicalFlagIndex >= 0) {
-    const hq = recentQuestions[historicalFlagIndex];
+  if (flagLogIndex !== null && flagLogIndex >= 0) {
+    const hq = sessionLog[flagLogIndex];
     if (!hq) { closeFlag(); return; }
     q_text     = hq.question_text;
     q_answer   = hq.correct_answer;
     q_category = hq.category;
-    // Disable the flag button after submitting
-    const btn = document.getElementById('hflag-' + historicalFlagIndex);
-    if (btn) { btn.textContent = '✓'; btn.disabled = true; }
+    // Mark as flagged and disable button
+    hq._flagged = true;
+    const btn = document.getElementById('plf-' + flagLogIndex);
+    if (btn) { btn.textContent = '✓ Flagged'; btn.disabled = true; }
   } else {
     q_text     = currentQuestion.text || '';
     q_answer   = currentQuestion.display_answer || '';
@@ -543,6 +532,17 @@ function submitFlag() {
       user_comment: comment
     })
   }).then(() => closeFlag());
+}
+
+function _tap(e, fn) {
+  if (e.type === 'touchend') {
+    e.preventDefault();
+    e.currentTarget._lt = Date.now();
+    fn();
+  } else if (e.type === 'click') {
+    if (e.currentTarget._lt && Date.now() - e.currentTarget._lt < 600) return;
+    fn();
+  }
 }
 
 // ── BOOT ──────────────────────────────────────────────────────────────────────

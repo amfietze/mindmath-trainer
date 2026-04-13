@@ -11,7 +11,7 @@ MindMath Trainer is a Flask-based multi-game PWA designed to run on an iPhone (S
 The app currently has three games, accessible from a game-launcher home screen at `/`:
 - **Mental Arithmetic** — Optiver-style arithmetic training with Open Practice (adaptive, untimed) and Test Mode (80 questions, 8 min, MC). Five question categories across 4 difficulty levels.
 - **Sequences** — Number and letter pattern sequences across four difficulty levels. Practice Mode (adaptive) and Test Mode (8 min, MC, +1/−1 scoring). Supports Multiple Choice and Open Answer (numpad for numbers, A–Z keyboard for letters).
-- **Word Associations** — Verbal analogy questions ("Crown : Tree → Head : ___?"). Practice Mode only, Multiple Choice (4 options). Questions sourced from a hardcoded curated JSON bank. Supports English and German (language selected on settings page). 10 analogy categories, 150+ questions per language.
+- **Word Associations** — Verbal analogy questions ("Crown : Tree → Head : ___?"). Practice Mode only, Multiple Choice (4 options). Questions sourced from a hardcoded curated JSON bank. Supports English, German, and French (language selected on settings page via 3-button selector). 10 analogy categories, 150+ questions per language.
 
 ---
 
@@ -46,8 +46,10 @@ mental-math-trainer/
 ├── flagged_questions.json  Append-only list of user-flagged questions (excluded from git)
 ├── .gitignore              Excludes venv, __pycache__, .env, flagged_questions.json
 ├── data/
-│   ├── associations_en.json  EN question bank (150 verbal analogy questions, 10 categories)
-│   └── associations_de.json  DE question bank (same structure, 150 German questions)
+│   ├── associations_en.json    EN question bank (150 verbal analogy questions, 10 categories)
+│   ├── associations_de.json    DE question bank (same structure, 150 German questions)
+│   ├── associations_fr.json    FR question bank (156 French questions, 10 categories)
+│   └── validate_associations.py  Quality-check script: flags too-similar pairs, duplicates, hypernym confusion
 ├── static/
 │   ├── app.js              Minimal shared JS (prevents double-tap zoom on iOS)
 │   ├── style.css           Complete styling; CSS variables; responsive dark theme
@@ -94,9 +96,9 @@ These decisions are intentional and must not be undone without explicit instruct
 - **Home screen is a game launcher at `/`**. Each game lives under its own URL namespace (`/arithmetic`, `/sequences`). Future games add tiles to home.html and new route namespaces.
 - **Sequences game uses session keys prefixed with `seq_`** — `seq_difficulty`, `seq_answer_mode`, `seq_stats`, `seq_current`, `seq_question_log`, `seq_results` — to avoid collision with arithmetic session keys.
 - **Word Associations uses session keys prefixed with `assoc_`** — `assoc_language`, `assoc_used_ids`, `assoc_stats`, `assoc_current`, `assoc_question_log`, `assoc_results` — to avoid collision with other games.
-- **Word Associations question bank is hardcoded JSON** — loaded from `data/associations_en.json` and `data/associations_de.json`. The bank is cached in a module-level dict in `association_engine.py` so files are read only once per process. The bank is never modified at runtime.
+- **Word Associations question bank is hardcoded JSON** — loaded from `data/associations_en.json`, `data/associations_de.json`, or `data/associations_fr.json` depending on the selected language. The bank is cached in a module-level dict in `association_engine.py` so files are read only once per process. The bank is never modified at runtime.
 - **Bank exhaustion behaviour**: `get_association_question()` receives `exclude_ids` (session's used ID list). When all 150 IDs are exhausted, `available` falls back to the full bank and the session restarts seamlessly.
-- **Word Associations is Practice-only** — no Test Mode, no timer, no difficulty setting. Language (EN/DE) is the only setting, toggled on the settings page.
+- **Word Associations is Practice-only** — no Test Mode, no timer, no difficulty setting. Language (EN/DE/FR) is the only setting, selected on the settings page via a 3-button selector.
 - **Letter keyboard is a custom A–Z grid** (4 rows × 7 columns) in `sequence.html`. Native keyboard is never triggered for letter sequences.
 - **Sequence answers are always exact** — `_check_sequence_answer()` uses string equality (case-insensitive) or numeric tolerance of 0.001. No repeating-decimal tolerance is applied.
 
@@ -110,17 +112,31 @@ These decisions are intentional and must not be undone without explicit instruct
 - Answer format: Open Answer (custom numpad, no native keyboard) or Multiple Choice (4 options stacked vertically, same distractor logic as Test Mode) — user-selected on home screen.
 - Adaptive difficulty: 5 correct in a row → `level_modifier` +1 (max +5); 3 wrong in a row → `level_modifier` -1 (min -3). Modifier passed to question generator.
 - Immediate feedback overlay after each answer (correct / wrong / skipped), with special "Accepted" message for rounded-decimal matches on repeating decimals only.
-- **Pause mode** (Open Answer only): ⏸ button in top bar freezes timer; shows a review panel with the current question and last 3 answered questions. Each history entry shows result, question text, user's answer vs correct answer, and a 🚩 flag button. Resume resumes countdown from exact frozen position. Timer at 0 when paused → auto-skip on resume. Purely client-side; no new Flask endpoints. State kept in `recentQuestions` JS array (max 3 entries, newest first).
+- **Pause mode** (all answer modes): ⏸ button in top bar (left of 🚩) available in all 5 game screens. Tapping freezes all timers, shows a full-screen overlay with: "⏸ Paused — Question Log (N answered)" header, scrollable list of ALL answered questions in reverse chronological order (most recent first), and a "▶ Resume" button at bottom. Each log entry shows: question number, question text, user's answer, correct answer, result icon, and a 🚩 Flag button. Resume restores timers from exact frozen values. Purely client-side; no new Flask endpoints. State kept in `sessionLog` JS array (all entries, newest prepended). For test modes: `pauseElapsedOffset` / `totalPausedSeconds` track accumulated pause time so the global countdown adjusts correctly.
+- **Three flagging entry points** (all game screens):
+  1. 🚩 button in top bar during a question → flags the current unanswered question.
+  2. 🚩 button per entry in the pause overlay log → flags a historical answered question.
+  3. 🚩 button per card in the end-of-round question log on results screens.
+  All three use the same `POST /flag` endpoint. After flagging, the button becomes "✓ Flagged" and is disabled.
 - Skip button always visible in bottom zone (calls same handler as timer expiry).
 - Session ends at "End" button → `/end-session` POST → redirects to `/results`.
 - Stats tracked: total, correct, wrong, skipped, total_time, by_category.
 
-### Results Screen
+### Results Screens
+All three results screens (`results.html`, `sequence_results.html`, `association_results.html`) share a standardised bottom button pair:
+
+  **[ 🏠 Home ]**  **[ 🔄 Play Again ]**
+
+- Both buttons on the same row, equal width (`flex: 1`), 12px gap, `min-height: 52px`.
+- **Home**: navigates to `/`. Secondary style (dark background, accent border).
+- **Play Again**: POSTs to `/restart`, `/sequences/restart`, or `/associations/restart` respectively. Server reads the stored session settings (difficulty, mode, answer_mode, timer) and re-initialises the session with the same parameters — effectively skipping the settings screen. Primary style (accent purple fill).
+- **End-of-round Question Log**: each card has a 🚩 Flag button that opens a flag modal pre-filled with that question's data. Flag modal HTML and `flagFromLog()` / `submitFlagModal()` JS added to all three results templates.
+
 After any session, `results.html` shows:
 1. Badge + big score / question count.
 2. Summary stats card (correct / wrong / skipped, percentages, avg time).
 3. Category breakdown table.
-4. **Question Log** (collapsible, default collapsed): header "Question Log (N questions)". Toggle via single tap/click on header. Body has `max-height: 60vh; overflow-y: auto`. One card per question: number, category pill, question text, result (✓/✗/—), your answer vs correct answer. Left border colour: green (correct), red (wrong), grey (skipped). Wrong-answer cards show the correct answer in larger/bolder style. Server-rendered via Jinja2 — no JS rendering loop. Practice: `time_taken` shown per card. Test Mode: time shown as `None` (omitted).
+4. **Question Log** (collapsible, default collapsed): header "Question Log (N questions)". One card per question: number, category pill, question text, result (✓/✗/—), your answer vs correct answer, 🚩 Flag button. Left border colour: green (correct), red (wrong), grey (skipped). Server-rendered via Jinja2. Practice: `time_taken` shown per card. Test Mode: time shown as `None` (omitted).
 
 ### UX / Layout (game screens)
 - Game screens (`.practice-screen`, `.test-screen`): `height: 100dvh; overflow: hidden; flex column`.
@@ -181,12 +197,12 @@ Constraints: all 4 options distinct within 0.001; no distractor >9× or <0.111×
 
 ### Sequence Types by Difficulty
 
-| Difficulty | Number types | Letter types |
+| Difficulty | Number types (count) | Letter types (count) |
 |---|---|---|
-| Easy | `arithmetic` (d ±1–5), `geometric_x2` / `geometric_div2` | `alphabet_step` (+1, +2, −1), `vowels` (A,E,I,O,U), `alphabet_step` (skip-2 from Z) |
-| Medium | `arithmetic` (d ±5–20), `geometric_x3/x4/div3`, `squares`, `triangular`, `primes`, `alternating_sign`, `cumulative_sum`, `digit_sum` | `alternating` (+2+3), `alphabet_step` (−2), `alternating` (two interleaved), `alternating_ends` (A,Z,B,Y...), `consonants`, `prime_positions` |
-| Normal | `fibonacci`, `alternating` (interleaved), `increasing_differences`, `arithmetic` (crosses zero), `geometric_alt_sign` (×−r), `square_offset` (n²+c), `alternating_step` (+d1+d2), `cubes` | `positional` (increasing gaps), `two_letter` (AB,CD,EF), `keyboard_row` (QWERTY), `diagonal_grid`, `two_seq_merge` |
-| Hard | `diff_of_diffs` (2nd-order), `alternating_op` (×m +a), `power_offset` (2^n+c), `mixed_geom_arith`, `factorial`, `recursive_double` (×2+c), `interleaved_geometric`, `digital_root` | `alphabet_wrap` (+3/4/5 mod 26), `complex_positional` (irregular gaps), `caesar_shift` (+1,+2,+3...), `fibonacci_positions`, `modular_arithmetic` (×2+1 mod 26) |
+| Easy (5 num, 5 let) | `arithmetic` (d ±1–5), `geometric_x2/div2`, `count_by_10` (10,20,30…), `even_numbers`, `odd_numbers` | `alphabet_step` (+1), `alphabet_step` (+2), `alphabet_rev` (−1), `vowels` (A,E,I,O,U), `alphabet_rev_skip` (skip-2 from Z) |
+| Medium (10 num, 6 let) | `arithmetic` (d ±5–20), `geometric_x3/x4/div3`, `squares`, `triangular`, `primes`, `alternating_sign`, `powers_of_2`, `powers_of_3`, `multiples_N`, `collatz` | `alternating_step` (+2+3), `alphabet_rev2` (−2), `skip_wrap`, `alternating_ends` (A,Z,B,Y…), `consonants`, `prime_positions` |
+| Normal (12 num, 5 let) | `fibonacci`, `alternating_interleaved`, `increasing_differences`, `arithmetic_neg` (crosses zero), `geometric_alt_sign` (×−r), `square_offset` (n²+c), `alternating_two_step` (+d1+d2), `cubes`, `second_order_recurrence`, `lucas_numbers`, `catalan_numbers`, `cumulative_sum` *(moved from Medium)* | `positional` (increasing gaps), `two_letter` (AB,CD,EF), `keyboard_row` (QWERTY), `diagonal_grid`, `two_seq_merge` |
+| Hard (13 num, 5 let) | `diff_of_diffs` (2nd-order), `alternating_op` (×m +a), `power_offset` (2^n+c), `mixed_geom_arith`, `factorial`, `recursive_double` (×2+c), `interleaved_geometric`, `digital_root`, `digit_sum` *(moved from Medium)*, `recaman`, `sylvester`, `look_and_say`, `padovan` | `alphabet_wrap` (+3/4/5 mod 26), `complex_positional` (irregular gaps), `caesar_shift` (+1,+2,+3…), `fibonacci_positions`, `modular_arithmetic` (×2+1 mod 26) |
 
 ### rule_description Field
 
@@ -217,6 +233,12 @@ Every question dict carries `rule_description` — a user-facing plain-language 
 | 20–29 | Good |
 | 10–19 | Getting there |
 | < 10 | Keep practising |
+
+### Sequence MC Distractor Rules
+
+`_num_distractors()` in `sequence_engine.py` generates 3 numeric distractors via offset strategies (±percentage, ±scaled magnitude, ±multiplier). Key constraint added in session 11:
+
+- **Integer sequence rule**: if `_is_integer_sequence(q)` is True (no decimal point in any non-blank term), all distractor candidates are rounded to the nearest integer before deduplication. This prevents decimal distractors (e.g. 8.0, 9.5) from appearing when the correct answer is an integer. `_is_integer_sequence()` checks whether all visible terms contain no `.` character.
 
 ### Blank Position Rules
 
@@ -275,7 +297,7 @@ V  W  X  Y  Z  ⌫  ✓
 
 | Key | Type | Description |
 |---|---|---|
-| `assoc_language` | str | `'en'` \| `'de'` — set at `/associations/start`, used throughout the session |
+| `assoc_language` | str | `'en'` \| `'de'` \| `'fr'` — set at `/associations/start`, used throughout the session |
 | `assoc_used_ids` | list | IDs of questions already served in this session (deduplication) |
 | `assoc_stats` | dict | `{total, correct, wrong, skipped}` |
 | `assoc_current` | dict | Current question dict (includes `options` and `correct_index`) |
@@ -322,10 +344,37 @@ The question is displayed as: **Crown : Tree → Head : ___?**
 
 ### Language Support
 
-- `'en'`: English, `data/associations_en.json` (150 questions)
-- `'de'`: German, `data/associations_de.json` (150 questions, adapted/translated)
-- Language is selected on the settings page only (toggle stays fixed during a session)
-- German questions are culturally adapted where direct translation produces unnatural analogies
+Three languages are available, selected on the settings page with a 3-button selector (`🇬🇧 English / 🇩🇪 Deutsch / 🇫🇷 Français`). Language stays fixed for the entire session and is stored in `assoc_language`.
+
+| Code | Language | Bank file | Questions | Notes |
+|---|---|---|---|---|
+| `'en'` | English | `data/associations_en.json` | 150 | Original bank |
+| `'de'` | German | `data/associations_de.json` | 150 | Culturally adapted, not word-for-word translated |
+| `'fr'` | French | `data/associations_fr.json` | 156 | IDs: `fr_XX_NNN` format |
+
+French bank breakdown: `part_to_whole`×15, `function_purpose`×18, `cause_effect`×15, `degree_intensity`×15, `antonyms`×15, `category_member`×18, `location`×15, `creator_creation`×15, `tool_user`×15, `sequence_order`×15.
+
+`load_bank()` in `association_engine.py` accepts `'en'`, `'de'`, or `'fr'`. `associations_start` and `associations_restart` routes validate against this set.
+
+### Category Reveal Behaviour
+
+The question category is **hidden during the question** and only revealed after the user answers. In `association.html`:
+
+- The `<div class="question-category" id="category-label">` is initialised `style="display:none"`.
+- `renderQuestion()` explicitly hides it again on each new question.
+- `showFeedback()` injects the category as a styled accent pill (`<span class="feedback-cat">`) at the top of the feedback answer display, so the user sees the category label only in the feedback overlay after answering.
+
+### Question Quality Rules
+
+Five rules enforced when authoring distractor entries in the JSON banks (validated by `data/validate_associations.py`):
+
+1. **No too-similar pairs**: distractors must not be synonyms or near-synonyms of the correct answer (e.g. "Torso" and "Body" are too similar).
+2. **No duplicate distractors**: all 3 distractors must be distinct from each other and from the correct answer.
+3. **No hypernym confusion**: distractors must not be the category name itself or a direct supertype (e.g. `category_member` questions must not use "Animal" as a distractor when the answer is "Dog").
+4. **Plausible but wrong**: each distractor should be a word a guesser might plausibly pick — related to the domain but clearly incorrect in the analogy.
+5. **Language consistency**: German and French questions must use grammatically natural phrasings; distractors must be in the same language as the answer.
+
+`data/validate_associations.py` runs checks 1–3 programmatically. Run it after editing any bank: `python data/validate_associations.py`. Output: flag count per bank and total. Target: 0 flags.
 
 ### Answer Validation
 
@@ -492,6 +541,17 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-04-13]** — Session 11: nine targeted improvements across all three games:
+  1. **Back button spacing** — back link moved outside `<header>` in `arithmetic.html`, `sequence_home.html`, `association_home.html`. `.submenu-back` CSS rule added (`display: block; margin-bottom: 24px`) so it renders as a full-width block with spacing below.
+  2. **Uniform end-screen buttons** — all three results screens (`results.html`, `sequence_results.html`, `association_results.html`) now use a standardised `[ 🏠 Home ] [ 🔄 Play Again ]` side-by-side button pair (`flex: 1`, 12px gap, `min-height: 52px`). **Play Again** POSTs to `/restart`, `/sequences/restart`, or `/associations/restart` — server re-inits session with the same settings, skipping the settings screen.
+  3. **Pause mode with full session log** — all 5 game screens now have a ⏸ pause button in the top bar. Pausing freezes all timers (practice: `frozenTimeLeft` + `clearInterval`; arithmetic test: `pauseElapsedOffset` accumulator; sequence test: `totalPausedSeconds` accumulator) and shows a full-screen overlay with a scrollable question log of ALL answered questions (newest first). Each log entry has a 🚩 Flag button. Three flag entry points total: top-bar during a question, pause overlay log, end-of-round question log cards. All three results templates gained a flag modal + `flagFromLog()` / `submitFlagModal()` JS. State kept in client-side `sessionLog` array.
+  4. **Integer sequence MC distractors** — `_is_integer_sequence(q)` helper checks if all visible terms are integers (no `.`). `_num_distractors()` gains a `force_int` flag: when True, all distractor candidates are rounded to the nearest integer and deduplicated before use. Prevents `8.0`, `9.5`-style decimal distractors for integer sequences.
+  5. **New sequence types** — 16 new number sequence generators added to `sequence_engine.py`: Easy: `count_by_10`, `even_numbers`, `odd_numbers`; Medium: `powers_of_2`, `powers_of_3`, `multiples_N`, `collatz`; Normal: `second_order_recurrence`, `lucas_numbers`, `catalan_numbers`; Hard: `recaman`, `sylvester`, `look_and_say`, `padovan`. Final counts: Easy 5, Medium 10, Normal 12, Hard 13 number generators.
+  6. **Sequence difficulty recalibration** — `cumulative_sum` moved Medium → Normal (requires understanding second-order patterns); `digit_sum` moved Medium → Hard (requires recognising digit-sum rule from sequence values). Hard is now meaningfully harder than Normal.
+  7. **Word association category reveal** — category label hidden during question (`style="display:none"`), injected as a styled pill only in the post-answer feedback overlay. `renderQuestion()` hides it; `showFeedback()` injects `<span class="feedback-cat">`. `.feedback-cat` CSS class added (accent pill).
+  8. **Word association quality** — `data/validate_associations.py` created: checks too-similar distractor pairs, duplicates, and hypernym confusion. 12 EN fixes + 11 DE fixes applied. Result: 0 flags across 300 existing questions.
+  9. **French language support** — `data/associations_fr.json` created (156 questions, 10 categories). 3-button language selector on `association_home.html` (EN/DE/FR). `association_engine.py`, `app.py` routes, `association.html` and `association_results.html` templates all updated to handle `'fr'`. French flag emoji propagated throughout (top bar counter, results badge).
 
 - **[2026-04-12]** — Session 10: Word Associations game added as third game on home screen launcher:
   1. **Question banks** — `data/associations_en.json` and `data/associations_de.json` each contain 150 curated verbal analogy questions across 10 categories (`part_to_whole` ×15, `function_purpose` ×20, `cause_effect` ×15, `degree_intensity` ×15, `antonyms` ×15, `category_member` ×20, `location` ×10, `creator_creation` ×15, `tool_user` ×15, `sequence_order` ×10). Each question has plausible distractors and a plain-language `relationship` field. German questions are culturally adapted, not word-for-word translated.

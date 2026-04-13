@@ -11,6 +11,7 @@
     </div>
     <div class="seq-q-counter" id="q-counter">Q {{ stats.total + 1 }}</div>
     <div class="top-bar-actions">
+      <button id="pause-btn" class="btn-pause">⏸</button>
       <button id="flag-btn" class="btn-pause">🚩</button>
       <button id="end-btn" class="btn-end">End</button>
     </div>
@@ -84,6 +85,15 @@
 
 </div>
 
+<!-- Pause overlay -->
+<div class="pause-overlay" id="pause-overlay" style="display:none">
+  <div class="pause-header">
+    <span class="pause-title" id="pause-title">⏸ Paused — Question Log (0 answered)</span>
+  </div>
+  <div class="pause-log" id="pause-log"></div>
+  <button class="pause-resume-btn" ontouchend="_tap(event, resumeGame)" onclick="_tap(event, resumeGame)">▶ Resume</button>
+</div>
+
 <!-- Flag modal -->
 <div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
 <div class="modal" id="flag-modal" style="display:none">
@@ -111,6 +121,13 @@ let questionStartTime = Date.now();
 // Input state
 let numInput = '';
 let letterInput = '';
+
+// Pause state
+let isPaused = false;
+
+// Session log
+let sessionLog = [];
+let flagLogIndex = null;
 
 // ── Input mode helper ─────────────────────────────────────────────────────────
 function getInputMode(q) {
@@ -263,6 +280,7 @@ function submitLetter() {
 function submitMC(optionIndex) {
   if (awaitingNext) return;
   const elapsed = (Date.now() - questionStartTime) / 1000;
+  const userAns = (currentQ.options || [])[optionIndex] || '?';
   awaitingNext = true;
   fetch('/sequences/submit', {
     method: 'POST',
@@ -275,7 +293,7 @@ function submitMC(optionIndex) {
     })
   })
   .then(r => r.json())
-  .then(data => showFeedback(data))
+  .then(data => { data._userAnswer = userAns; showFeedback(data); })
   .catch(() => loadNext());
 }
 
@@ -302,7 +320,7 @@ function doSubmit(val, skipped) {
     })
   })
   .then(r => r.json())
-  .then(data => showFeedback(data))
+  .then(data => { data._userAnswer = skipped ? '—' : (val || ''); showFeedback(data); })
   .catch(() => loadNext());
 }
 
@@ -312,6 +330,8 @@ function showFeedback(data) {
   const icon    = document.getElementById('feedback-icon');
   const text    = document.getElementById('feedback-text');
   const ans     = document.getElementById('feedback-answer');
+
+  const seqStr = (currentQ.sequence_display || []).join(' · ');
 
   if (data.result === 'skipped') {
     icon.textContent = '\u23ed';
@@ -334,6 +354,16 @@ function showFeedback(data) {
     document.getElementById('stat-wrong').textContent = statsWrong;
   }
 
+  // Push to session log (newest first via unshift)
+  sessionLog.unshift({
+    number: sessionLog.length + 1,
+    question_text: seqStr,
+    user_answer: data._userAnswer || (data.result === 'skipped' ? '—' : ''),
+    correct_answer: data.correct_answer || '',
+    result: data.result,
+    category: currentQ.category || '',
+  });
+
   document.getElementById('bottom-zone').style.display = 'none';
   overlay.style.display = 'flex';
 
@@ -355,6 +385,80 @@ function loadNext() {
     .catch(function() { awaitingNext = false; });
 }
 
+// ── Pause ─────────────────────────────────────────────────────────────────────
+
+function _tap(e, fn) {
+  if (e.type === 'touchend') {
+    e.preventDefault();
+    e.currentTarget._lt = Date.now();
+    fn();
+  } else if (e.type === 'click') {
+    if (e.currentTarget._lt && Date.now() - e.currentTarget._lt < 600) return;
+    fn();
+  }
+}
+
+function togglePause() {
+  if (isPaused) {
+    resumeGame();
+  } else {
+    pauseGame();
+  }
+}
+
+function pauseGame() {
+  if (awaitingNext) return;
+  isPaused = true;
+  const btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '▶';
+  renderPauseLog();
+  document.getElementById('pause-overlay').style.display = 'flex';
+}
+
+function resumeGame() {
+  isPaused = false;
+  const btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '⏸';
+  document.getElementById('pause-overlay').style.display = 'none';
+}
+
+function renderPauseLog() {
+  const titleEl = document.getElementById('pause-title');
+  const container = document.getElementById('pause-log');
+  if (!container) return;
+  if (titleEl) titleEl.textContent = '⏸ Paused — Question Log (' + sessionLog.length + ' answered)';
+  if (!sessionLog.length) {
+    container.innerHTML = '<div class="pause-empty">No questions answered yet.</div>';
+    return;
+  }
+  container.innerHTML = sessionLog.map(function(q, i) {
+    const icon = q.result === 'correct' ? '✓' : (q.result === 'wrong' ? '✗' : '—');
+    const cls  = q.result === 'correct' ? 'correct' : (q.result === 'wrong' ? 'wrong' : 'skipped');
+    const userAns = q.user_answer || '—';
+    const flaggedAttr = q._flagged ? ' disabled' : '';
+    const flagLabel = q._flagged ? '✓ Flagged' : '🚩';
+    return '<div class="pause-log-entry ' + cls + '">'
+      + '<div class="pause-log-top">'
+      + '<span class="pause-log-meta">#' + q.number + ' &nbsp;' + icon + '</span>'
+      + '<span class="pause-log-q">' + q.question_text + '</span>'
+      + '<button class="pause-log-flag" id="plf-' + i + '"' + flaggedAttr + ' ontouchend="_tap(event,function(){flagFromPauseLog(' + i + ');})" onclick="_tap(event,function(){flagFromPauseLog(' + i + ');})">' + flagLabel + '</button>'
+      + '</div>'
+      + '<div class="pause-log-answers">Your: ' + userAns + ' &nbsp;·&nbsp; Correct: ' + q.correct_answer + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function flagFromPauseLog(i) {
+  const q = sessionLog[i];
+  if (!q) return;
+  flagLogIndex = i;
+  document.getElementById('modal-q-text').textContent = q.question_text;
+  document.getElementById('modal-q-answer').textContent = q.correct_answer;
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
 // ── End session ───────────────────────────────────────────────────────────────
 function endGame() {
   fetch('/sequences/end', {method: 'POST'})
@@ -364,6 +468,7 @@ function endGame() {
 
 // ── Flag modal ────────────────────────────────────────────────────────────────
 function openFlag() {
+  flagLogIndex = null;
   const seqStr = (currentQ.sequence_display || []).join(', ');
   document.getElementById('modal-q-text').textContent = seqStr;
   document.getElementById('modal-q-answer').textContent = currentQ.answer || '';
@@ -373,12 +478,29 @@ function openFlag() {
 }
 
 function closeFlag() {
+  flagLogIndex = null;
   document.getElementById('modal-backdrop').style.display = 'none';
   document.getElementById('flag-modal').style.display = 'none';
 }
 
 function submitFlag() {
-  const seqStr = (currentQ.sequence_display || []).join(', ');
+  let q_text, q_answer, q_category;
+
+  if (flagLogIndex !== null && flagLogIndex >= 0) {
+    const hq = sessionLog[flagLogIndex];
+    if (!hq) { closeFlag(); return; }
+    q_text     = hq.question_text;
+    q_answer   = hq.correct_answer;
+    q_category = hq.category;
+    hq._flagged = true;
+    const btn = document.getElementById('plf-' + flagLogIndex);
+    if (btn) { btn.textContent = '✓ Flagged'; btn.disabled = true; }
+  } else {
+    q_text     = (currentQ.sequence_display || []).join(', ');
+    q_answer   = currentQ.answer || '';
+    q_category = currentQ.category || '';
+  }
+
   const comment = document.getElementById('flag-comment').value;
   fetch('/flag', {
     method: 'POST',
@@ -386,9 +508,9 @@ function submitFlag() {
     body: JSON.stringify({
       game_mode: 'sequences',
       difficulty: DIFFICULTY,
-      question_text: seqStr,
-      correct_answer: currentQ.answer || '',
-      category: currentQ.category || '',
+      question_text: q_text,
+      correct_answer: q_answer,
+      category: q_category,
       user_comment: comment,
     })
   }).then(() => closeFlag());
@@ -407,6 +529,7 @@ function submitFlag() {
       if (Date.now() - lastTouch < 600) return; fn();
     });
   }
+  bindBtn('pause-btn', togglePause);
   bindBtn('flag-btn', openFlag);
   bindBtn('end-btn', endGame);
   bindBtn('num-submit-btn', submitNumpad);

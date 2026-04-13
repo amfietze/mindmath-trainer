@@ -11,9 +11,10 @@
     </div>
     <div class="seq-q-counter" id="q-counter">
       Q {{ stats.total + 1 }}
-      <span style="margin-left:6px;font-size:13px">{{ '🇬🇧' if language == 'en' else '🇩🇪' }}</span>
+      <span style="margin-left:6px;font-size:13px">{{ '🇬🇧' if language == 'en' else ('🇫🇷' if language == 'fr' else '🇩🇪') }}</span>
     </div>
     <div class="top-bar-actions">
+      <button id="pause-btn" class="btn-pause">⏸</button>
       <button id="flag-btn" class="btn-pause">🚩</button>
       <button id="end-btn" class="btn-end">End</button>
     </div>
@@ -36,9 +37,8 @@
           <span class="assoc-blank" id="assoc-blank">___?___</span>
         </div>
       </div>
-      <div class="question-category" id="category-label">
-        {{ question.category.replace('_', ' ').upper() }}
-      </div>
+      <!-- Category hidden during question; revealed in feedback overlay post-answer -->
+      <div class="question-category" id="category-label" style="display:none"></div>
     </div>
     <!-- Feedback overlay -->
     <div class="feedback-overlay" id="feedback-overlay" style="display:none">
@@ -54,6 +54,15 @@
     <button class="btn-skip" id="skip-btn" ontouchstart="assocSkipTap(event)" onclick="assocSkip()">Skip</button>
   </div>
 
+</div>
+
+<!-- Pause overlay -->
+<div class="pause-overlay" id="pause-overlay" style="display:none">
+  <div class="pause-header">
+    <span class="pause-title" id="pause-title">⏸ Paused — Question Log (0 answered)</span>
+  </div>
+  <div class="pause-log" id="pause-log"></div>
+  <button class="pause-resume-btn" ontouchend="_tap(event, resumeGame)" onclick="_tap(event, resumeGame)">▶ Resume</button>
 </div>
 
 <!-- Flag modal -->
@@ -79,19 +88,26 @@ let statsTotal = {{ stats.total }};
 let awaitingNext = false;
 let questionStartTime = Date.now();
 
+// Pause state
+let isPaused = false;
+
+// Session log
+let sessionLog = [];
+let flagLogIndex = null;
+
 // ── Render helpers ─────────────────────────────────────────────────────────────
 function renderQuestion(q) {
   document.getElementById('prompt-a1').textContent = q.prompt_a1;
   document.getElementById('prompt-a2').textContent = q.prompt_a2;
   document.getElementById('prompt-b1').textContent = q.prompt_b1;
   document.getElementById('assoc-blank').textContent = '___?___';
-  document.getElementById('category-label').textContent =
-    (q.category || '').replace(/_/g, ' ').toUpperCase();
+  // Category hidden during question — revealed in feedback overlay post-answer
+  document.getElementById('category-label').style.display = 'none';
   statsTotal++;
+  var flagEmoji = LANGUAGE === 'fr' ? '🇫🇷' : (LANGUAGE === 'de' ? '🇩🇪' : '🇬🇧');
   document.getElementById('q-counter').innerHTML =
     'Q ' + statsTotal +
-    '<span style="margin-left:6px;font-size:13px">' +
-    (LANGUAGE === 'en' ? '🇬🇧' : '🇩🇪') + '</span>';
+    '<span style="margin-left:6px;font-size:13px">' + flagEmoji + '</span>';
 }
 
 function renderOptions(q) {
@@ -110,7 +126,7 @@ function renderOptions(q) {
 
 // ── MC submit ──────────────────────────────────────────────────────────────────
 function submitMC(optionIndex, optionText) {
-  if (awaitingNext) return;
+  if (awaitingNext || isPaused) return;
   awaitingNext = true;
   const elapsed = (Date.now() - questionStartTime) / 1000;
 
@@ -124,7 +140,7 @@ function submitMC(optionIndex, optionText) {
     })
   })
   .then(r => r.json())
-  .then(data => showFeedback(data))
+  .then(data => { data._userAnswer = optionText; showFeedback(data); })
   .catch(() => loadNext());
 }
 
@@ -132,7 +148,7 @@ function submitMC(optionIndex, optionText) {
 function assocSkipTap(e) { if (e && e.type === 'touchstart') e.preventDefault(); assocSkip(); }
 
 function assocSkip() {
-  if (awaitingNext) return;
+  if (awaitingNext || isPaused) return;
   awaitingNext = true;
   const elapsed = (Date.now() - questionStartTime) / 1000;
   fetch('/associations/submit', {
@@ -152,26 +168,46 @@ function showFeedback(data) {
   const text    = document.getElementById('feedback-text');
   const ans     = document.getElementById('feedback-answer');
 
+  // Reveal category in overlay after answer
+  const catLabel = (currentQ.category || '').replace(/_/g, ' ').toUpperCase();
+
   if (data.result === 'skipped') {
     icon.textContent = '\u23ed';
     icon.className = 'feedback-icon skipped';
     text.textContent = 'Skipped';
-    ans.textContent = 'Answer: ' + data.correct_answer;
+    ans.innerHTML = (catLabel ? '<span class="feedback-cat">' + catLabel + '</span><br>' : '') +
+                    'Answer: ' + data.correct_answer;
   } else if (data.result === 'correct') {
     icon.textContent = '\u2713';
     icon.className = 'feedback-icon correct';
     text.textContent = 'Correct!';
-    ans.textContent = 'Answer: ' + data.correct_answer;
+    ans.innerHTML = (catLabel ? '<span class="feedback-cat">' + catLabel + '</span><br>' : '') +
+                    'Answer: ' + data.correct_answer;
     statsCorrect++;
     document.getElementById('stat-correct').textContent = statsCorrect;
   } else {
     icon.textContent = '\u2717';
     icon.className = 'feedback-icon wrong';
     text.textContent = 'Wrong';
-    ans.textContent = 'Answer: ' + data.correct_answer;
+    ans.innerHTML = (catLabel ? '<span class="feedback-cat">' + catLabel + '</span><br>' : '') +
+                    'Answer: ' + data.correct_answer;
     statsWrong++;
     document.getElementById('stat-wrong').textContent = statsWrong;
   }
+
+  // Build display text for this question
+  const qStr = (currentQ.prompt_a1 || '') + ' : ' + (currentQ.prompt_a2 || '') +
+               ' → ' + (currentQ.prompt_b1 || '') + ' : ___?';
+
+  // Push to session log (newest first)
+  sessionLog.unshift({
+    number: sessionLog.length + 1,
+    question_text: qStr,
+    user_answer: data.result === 'skipped' ? '—' : (data._userAnswer || ''),
+    correct_answer: data.correct_answer || '',
+    result: data.result,
+    category: currentQ.category || '',
+  });
 
   document.getElementById('bottom-zone').style.display = 'none';
   overlay.style.display = 'flex';
@@ -193,6 +229,72 @@ function loadNext() {
     .catch(function() { awaitingNext = false; });
 }
 
+// ── Pause ──────────────────────────────────────────────────────────────────────
+
+function togglePause() {
+  if (isPaused) {
+    resumeGame();
+  } else {
+    pauseGame();
+  }
+}
+
+function pauseGame() {
+  if (awaitingNext) return;
+  isPaused = true;
+  const btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '▶';
+  // Disable answer zone
+  document.getElementById('bottom-zone').style.pointerEvents = 'none';
+  renderPauseLog();
+  document.getElementById('pause-overlay').style.display = 'flex';
+}
+
+function resumeGame() {
+  isPaused = false;
+  const btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '⏸';
+  document.getElementById('bottom-zone').style.pointerEvents = '';
+  document.getElementById('pause-overlay').style.display = 'none';
+}
+
+function renderPauseLog() {
+  const titleEl = document.getElementById('pause-title');
+  const container = document.getElementById('pause-log');
+  if (!container) return;
+  if (titleEl) titleEl.textContent = '⏸ Paused — Question Log (' + sessionLog.length + ' answered)';
+  if (!sessionLog.length) {
+    container.innerHTML = '<div class="pause-empty">No questions answered yet.</div>';
+    return;
+  }
+  container.innerHTML = sessionLog.map(function(q, i) {
+    const icon = q.result === 'correct' ? '✓' : (q.result === 'wrong' ? '✗' : '—');
+    const cls  = q.result === 'correct' ? 'correct' : (q.result === 'wrong' ? 'wrong' : 'skipped');
+    const userAns = q.user_answer || '—';
+    const flaggedAttr = q._flagged ? ' disabled' : '';
+    const flagLabel = q._flagged ? '✓ Flagged' : '🚩';
+    return '<div class="pause-log-entry ' + cls + '">'
+      + '<div class="pause-log-top">'
+      + '<span class="pause-log-meta">#' + q.number + ' &nbsp;' + icon + '</span>'
+      + '<span class="pause-log-q">' + q.question_text + '</span>'
+      + '<button class="pause-log-flag" id="plf-' + i + '"' + flaggedAttr + ' ontouchend="_tap(event,function(){flagFromPauseLog(' + i + ');})" onclick="_tap(event,function(){flagFromPauseLog(' + i + ');})">' + flagLabel + '</button>'
+      + '</div>'
+      + '<div class="pause-log-answers">Your: ' + userAns + ' &nbsp;·&nbsp; Correct: ' + q.correct_answer + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function flagFromPauseLog(i) {
+  const q = sessionLog[i];
+  if (!q) return;
+  flagLogIndex = i;
+  document.getElementById('modal-q-text').textContent = q.question_text;
+  document.getElementById('modal-q-answer').textContent = q.correct_answer;
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'block';
+}
+
 // ── End session ────────────────────────────────────────────────────────────────
 function endGame() {
   fetch('/associations/end', { method: 'POST' })
@@ -202,6 +304,7 @@ function endGame() {
 
 // ── Flag modal ─────────────────────────────────────────────────────────────────
 function openFlag() {
+  flagLogIndex = null;
   const q = currentQ;
   const qStr = (q.prompt_a1 || '') + ' : ' + (q.prompt_a2 || '') +
                ' → ' + (q.prompt_b1 || '') + ' : ___?';
@@ -213,14 +316,31 @@ function openFlag() {
 }
 
 function closeFlag() {
+  flagLogIndex = null;
   document.getElementById('modal-backdrop').style.display = 'none';
   document.getElementById('flag-modal').style.display = 'none';
 }
 
 function submitFlag() {
-  const q = currentQ;
-  const qStr = (q.prompt_a1 || '') + ' : ' + (q.prompt_a2 || '') +
-               ' → ' + (q.prompt_b1 || '') + ' : ___?';
+  let q_text, q_answer, q_category;
+
+  if (flagLogIndex !== null && flagLogIndex >= 0) {
+    const hq = sessionLog[flagLogIndex];
+    if (!hq) { closeFlag(); return; }
+    q_text     = hq.question_text;
+    q_answer   = hq.correct_answer;
+    q_category = hq.category;
+    hq._flagged = true;
+    const btn = document.getElementById('plf-' + flagLogIndex);
+    if (btn) { btn.textContent = '✓ Flagged'; btn.disabled = true; }
+  } else {
+    const q = currentQ;
+    q_text     = (q.prompt_a1 || '') + ' : ' + (q.prompt_a2 || '') +
+                 ' → ' + (q.prompt_b1 || '') + ' : ___?';
+    q_answer   = q.answer || '';
+    q_category = q.category || '';
+  }
+
   const comment = document.getElementById('flag-comment').value;
   fetch('/flag', {
     method: 'POST',
@@ -228,9 +348,9 @@ function submitFlag() {
     body: JSON.stringify({
       game_mode: 'associations',
       difficulty: LANGUAGE,
-      question_text: qStr,
-      correct_answer: q.answer || '',
-      category: q.category || '',
+      question_text: q_text,
+      correct_answer: q_answer,
+      category: q_category,
       user_comment: comment,
     })
   }).then(() => closeFlag());
@@ -261,6 +381,7 @@ function _tap(e, fn) {
       if (Date.now() - lastTouch < 600) return; fn();
     });
   }
+  bindBtn('pause-btn', togglePause);
   bindBtn('flag-btn', openFlag);
   bindBtn('end-btn', endGame);
 })();

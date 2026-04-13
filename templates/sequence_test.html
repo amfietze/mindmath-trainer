@@ -15,6 +15,7 @@
       <span id="score-val">0</span>
       <span class="score-label"> pts</span>
     </div>
+    <button id="pause-btn" class="btn-pause">⏸</button>
     <button id="flag-btn" class="btn-pause">🚩</button>
   </div>
 
@@ -57,6 +58,15 @@
 
 </div>
 
+<!-- Pause overlay -->
+<div class="pause-overlay" id="pause-overlay" style="display:none">
+  <div class="pause-header">
+    <span class="pause-title" id="pause-title">⏸ Paused — Question Log (0 answered)</span>
+  </div>
+  <div class="pause-log" id="pause-log"></div>
+  <button class="pause-resume-btn" ontouchend="_tap(event, resumeGame)" onclick="_tap(event, resumeGame)">▶ Resume</button>
+</div>
+
 <!-- Flag modal -->
 <div class="modal-backdrop" id="modal-backdrop" style="display:none" ontouchend="_tap(event, closeFlag)" onclick="_tap(event, closeFlag)"></div>
 <div class="modal" id="flag-modal" style="display:none">
@@ -93,11 +103,18 @@ let testEnded = false;
 let busy = false;
 let lastOptionTouch = 0;
 let lastSkipTouch = 0;
+let isPaused = false;
+let frozenRemaining = 0;
+let pauseStartWallTime = 0;
+let totalPausedSeconds = 0;
+let sessionLog = [];
+let flagLogIndex = null;
 
 // ── Timer ────────────────────────────────────────────────────────────────────
 
 function getRemaining() {
-  var elapsed = (Date.now() / 1000) - SERVER_START;
+  if (isPaused) return frozenRemaining;
+  var elapsed = (Date.now() / 1000) - SERVER_START - totalPausedSeconds;
   return Math.max(0, TEST_DURATION - elapsed);
 }
 
@@ -169,7 +186,7 @@ function skipTap(e) {
 }
 
 function chooseOption(idx) {
-  if (testEnded || busy) return;
+  if (testEnded || busy || isPaused) return;
   // Debounce double-fire
   if (idx !== null && Date.now() - lastOptionTouch < 600 && event && event.type === 'click') return;
   if (idx === null && Date.now() - lastSkipTouch < 600 && event && event.type === 'click') return;
@@ -178,6 +195,17 @@ function chooseOption(idx) {
 
   var isSkipped = (idx === null);
   var isCorrect = (!isSkipped && idx === currentQuestion.correct_index);
+  var result = isSkipped ? 'skipped' : (isCorrect ? 'correct' : 'wrong');
+
+  // Record in session log (newest first)
+  sessionLog.unshift({
+    number: sessionLog.length + 1,
+    question_text: (currentQuestion.sequence_display || []).join(' · '),
+    user_answer: isSkipped ? '—' : (currentQuestion.options ? currentQuestion.options[idx] : '—'),
+    correct_answer: currentQuestion.answer || (currentQuestion.options ? currentQuestion.options[currentQuestion.correct_index] : ''),
+    result: result,
+    category: currentQuestion.category || '',
+  });
 
   var payload = {
     skipped: isSkipped,
@@ -250,9 +278,83 @@ function confirmQuit() {
   window.location.href = '/quit';
 }
 
+// ── Pause ─────────────────────────────────────────────────────────────────────
+
+function togglePause() {
+  if (isPaused) {
+    resumeGame();
+  } else {
+    pauseGame();
+  }
+}
+
+function pauseGame() {
+  if (testEnded) return;
+  frozenRemaining = getRemaining();  // capture before setting isPaused
+  isPaused = true;
+  pauseStartWallTime = Date.now() / 1000;
+  clearInterval(timerInterval);
+
+  var btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '▶';
+
+  renderPauseLog();
+  document.getElementById('pause-overlay').style.display = 'flex';
+}
+
+function resumeGame() {
+  isPaused = false;
+  totalPausedSeconds += (Date.now() / 1000 - pauseStartWallTime);
+
+  var btn = document.getElementById('pause-btn');
+  if (btn) btn.textContent = '⏸';
+
+  document.getElementById('pause-overlay').style.display = 'none';
+
+  startTimer();
+}
+
+function renderPauseLog() {
+  var titleEl = document.getElementById('pause-title');
+  var container = document.getElementById('pause-log');
+  if (!container) return;
+  if (titleEl) titleEl.textContent = '⏸ Paused — Question Log (' + sessionLog.length + ' answered)';
+  if (!sessionLog.length) {
+    container.innerHTML = '<div class="pause-empty">No questions answered yet.</div>';
+    return;
+  }
+  container.innerHTML = sessionLog.map(function(q, i) {
+    var icon = q.result === 'correct' ? '✓' : (q.result === 'wrong' ? '✗' : '—');
+    var cls  = q.result === 'correct' ? 'correct' : (q.result === 'wrong' ? 'wrong' : 'skipped');
+    var userAns = q.user_answer || '—';
+    var flaggedAttr = q._flagged ? ' disabled' : '';
+    var flagLabel = q._flagged ? '✓ Flagged' : '🚩';
+    return '<div class="pause-log-entry ' + cls + '">'
+      + '<div class="pause-log-top">'
+      + '<span class="pause-log-meta">#' + q.number + ' &nbsp;' + icon + '</span>'
+      + '<span class="pause-log-q">' + q.question_text + '</span>'
+      + '<button class="pause-log-flag" id="plf-' + i + '"' + flaggedAttr + ' ontouchend="_tap(event,function(){flagFromPauseLog(' + i + ');})" onclick="_tap(event,function(){flagFromPauseLog(' + i + ');})">' + flagLabel + '</button>'
+      + '</div>'
+      + '<div class="pause-log-answers">Your: ' + userAns + ' &nbsp;·&nbsp; Correct: ' + q.correct_answer + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function flagFromPauseLog(i) {
+  var q = sessionLog[i];
+  if (!q) return;
+  flagLogIndex = i;
+  document.getElementById('modal-q-text').textContent = q.question_text;
+  document.getElementById('modal-q-answer').textContent = q.correct_answer;
+  document.getElementById('flag-comment').value = '';
+  document.getElementById('modal-backdrop').style.display = 'block';
+  document.getElementById('flag-modal').style.display = 'flex';
+}
+
 // ── Flag ─────────────────────────────────────────────────────────────────────
 
 function openFlag() {
+  flagLogIndex = null;
   var display = (currentQuestion.sequence_display || []).join(' · ');
   document.getElementById('modal-q-text').textContent = display;
   document.getElementById('modal-q-answer').textContent = currentQuestion.answer || '';
@@ -262,22 +364,39 @@ function openFlag() {
 }
 
 function closeFlag() {
+  flagLogIndex = null;
   document.getElementById('modal-backdrop').style.display = 'none';
   document.getElementById('flag-modal').style.display = 'none';
 }
 
 function submitFlag() {
+  var q_text, q_answer, q_category;
+
+  if (flagLogIndex !== null && flagLogIndex >= 0) {
+    var hq = sessionLog[flagLogIndex];
+    if (!hq) { closeFlag(); return; }
+    q_text     = hq.question_text;
+    q_answer   = hq.correct_answer;
+    q_category = hq.category;
+    hq._flagged = true;
+    var btn = document.getElementById('plf-' + flagLogIndex);
+    if (btn) { btn.textContent = '✓ Flagged'; btn.disabled = true; }
+  } else {
+    q_text     = (currentQuestion.sequence_display || []).join(' · ');
+    q_answer   = currentQuestion.answer || '';
+    q_category = currentQuestion.sequence_type || 'sequence';
+  }
+
   var comment = document.getElementById('flag-comment').value.trim();
-  var display = (currentQuestion.sequence_display || []).join(' · ');
   fetch('/flag', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       game_mode: 'seq_test',
       difficulty: DIFFICULTY,
-      question_text: display,
-      correct_answer: currentQuestion.answer || '',
-      category: currentQuestion.sequence_type || 'sequence',
+      question_text: q_text,
+      correct_answer: q_answer,
+      category: q_category,
       user_comment: comment,
     }),
   }).then(function() { closeFlag(); });
@@ -302,6 +421,7 @@ function submitFlag() {
   }
 
   bindBtn('quit-btn', showQuitConfirm);
+  bindBtn('pause-btn', togglePause);
   bindBtn('flag-btn', openFlag);
 
   startTimer();
