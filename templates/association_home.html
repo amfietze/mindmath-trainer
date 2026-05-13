@@ -67,15 +67,18 @@
   (function() {
     var btn = document.getElementById('start-btn');
     var lastTouch = 0;
-    btn.addEventListener('touchend', function(e) {
-      e.preventDefault();
-      lastTouch = Date.now();
+    function doStart() {
+      if (!navigator.onLine) {
+        var lang = document.getElementById('language-input').value || 'en';
+        var params = new URLSearchParams({ game: 'assoc', language: lang });
+        sessionStorage.setItem('offline_start', params.toString());
+        window.location.href = '/static/offline.html';
+        return;
+      }
       document.getElementById('assocForm').submit();
-    }, { passive: false });
-    btn.addEventListener('click', function() {
-      if (Date.now() - lastTouch < 600) return;
-      document.getElementById('assocForm').submit();
-    });
+    }
+    btn.addEventListener('touchend', function(e) { e.preventDefault(); lastTouch = Date.now(); doStart(); }, { passive: false });
+    btn.addEventListener('click', function() { if (Date.now() - lastTouch < 600) return; doStart(); });
   })();
 </script>
 {% endblock %}

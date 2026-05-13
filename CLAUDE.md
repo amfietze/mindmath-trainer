@@ -51,11 +51,22 @@ mental-math-trainer/
 │   ├── associations_fr.json    FR question bank (156 French questions, 10 categories)
 │   └── validate_associations.py  Quality-check script: flags too-similar pairs, duplicates, hypernym confusion
 ├── static/
-│   ├── app.js              Minimal shared JS (prevents double-tap zoom on iOS)
+│   ├── app.js              Minimal shared JS (prevents double-tap zoom on iOS; syncPendingFlags on load/online)
 │   ├── style.css           Complete styling; CSS variables; responsive dark theme
 │   ├── manifest.json       PWA manifest (name, icons, standalone display, theme colour)
 │   ├── icon-192.png        PWA icon 192×192
-│   └── icon-512.png        PWA icon 512×512
+│   ├── icon-512.png        PWA icon 512×512
+│   ├── sw.js               Service worker: cache key `mindmath-v2`, cache-first /static/, network-only Flask routes
+│   ├── offline.html        Self-contained offline game page; all 3 games MC-only; reads sessionStorage `offline_start`
+│   ├── js/
+│   │   ├── rng.js              Seeded PRNG (Mulberry32) + math helpers: floorDiv, pyMod, gcd, trunc, r2, isRepeating
+│   │   ├── question_engine.js  Offline arithmetic question generation (MC only) — port of question_engine.py
+│   │   ├── sequence_engine.js  Offline sequence question generation (MC only) — port of updated sequence_engine.py
+│   │   └── association_engine.js  Async bank loader + question server — fetches /static/data/ JSON banks
+│   └── data/
+│       ├── associations_en.json   Copy of data/associations_en.json (served to SW and offline page)
+│       ├── associations_de.json   Copy of data/associations_de.json
+│       └── associations_fr.json   Copy of data/associations_fr.json
 └── templates/
     ├── base.html               Base template: PWA meta tags, manifest link, stylesheet, deferred app.js
     ├── home.html               Game launcher — tile selector for all games (/)
@@ -96,9 +107,12 @@ These decisions are intentional and must not be undone without explicit instruct
 - **Home screen is a game launcher at `/`**. Each game lives under its own URL namespace (`/arithmetic`, `/sequences`). Future games add tiles to home.html and new route namespaces.
 - **Sequences game uses session keys prefixed with `seq_`** — `seq_difficulty`, `seq_answer_mode`, `seq_stats`, `seq_current`, `seq_question_log`, `seq_results` — to avoid collision with arithmetic session keys.
 - **Word Associations uses session keys prefixed with `assoc_`** — `assoc_language`, `assoc_used_ids`, `assoc_stats`, `assoc_current`, `assoc_question_log`, `assoc_results` — to avoid collision with other games.
-- **Word Associations question bank is hardcoded JSON** — loaded from `data/associations_en.json`, `data/associations_de.json`, or `data/associations_fr.json` depending on the selected language. The bank is cached in a module-level dict in `association_engine.py` so files are read only once per process. The bank is never modified at runtime.
+- **Association JSON banks live in `static/data/`** — `association_engine.py` reads from `static/data/associations_{lang}.json` (updated from `data/` in session 13 to unify server and offline paths). The `data/` directory still exists as the canonical edit location; `static/data/` holds identical copies for SW caching and the offline page. Update both whenever editing a bank. The bank is cached module-level; never modified at runtime.
+- **Word Associations question bank is hardcoded JSON** — loaded from `static/data/associations_en.json`, `static/data/associations_de.json`, or `static/data/associations_fr.json` depending on the selected language. The bank is cached in a module-level dict in `association_engine.py` so files are read only once per process. The bank is never modified at runtime.
 - **Bank exhaustion behaviour**: `get_association_question()` receives `exclude_ids` (session's used ID list). When all 150 IDs are exhausted, `available` falls back to the full bank and the session restarts seamlessly.
 - **Word Associations is Practice-only** — no Test Mode, no timer, no difficulty setting. Language (EN/DE/FR) is the only setting, selected on the settings page via a 3-button selector.
+- **Offline mode uses `navigator.onLine` + service worker** — each settings page Start button checks `navigator.onLine`; if offline, it writes `sessionStorage.setItem('offline_start', params)` and redirects to `/static/offline.html`. The offline page reads this key to pre-select the game/difficulty/language. The service worker (`static/sw.js`, cache key `mindmath-v2`) uses cache-first for all `/static/` URLs and network-only for Flask routes (falling back to `/static/offline.html` on navigation failure). Offline games are always MC-only; open-answer and test modes are not supported offline. Flags submitted while offline are queued in `localStorage.pending_flags` and synced via `syncPendingFlags()` on next page load or `online` event.
+- **JS engine files mirror Python exactly** — `static/js/question_engine.js` and `static/js/sequence_engine.js` are line-by-line ports of their Python counterparts. When editing Python generators, update the corresponding JS generators too. `rng.js` exports `RNG` (Mulberry32 seeded PRNG) + shared helpers (`floorDiv`, `pyMod`, `gcd`, `trunc`, `r2`, `isRepeating`). All JS engine files use UMD wrappers so they work in both Node.js (for self-tests) and browser `<script>` tags.
 - **Letter keyboard is a custom A–Z grid** (4 rows × 7 columns) in `sequence.html`. Native keyboard is never triggered for letter sequences.
 - **Sequence answers are always exact** — `_check_sequence_answer()` uses string equality (case-insensitive) or numeric tolerance of 0.001. No repeating-decimal tolerance is applied.
 
@@ -200,9 +214,9 @@ Constraints: all 4 options distinct within 0.001; no distractor >9× or <0.111×
 | Difficulty | Number types (count) | Letter types (count) |
 |---|---|---|
 | Easy (5 num, 5 let) | `arithmetic` (d ±1–5), `geometric_x2/div2`, `count_by_10` (10,20,30…), `even_numbers`, `odd_numbers` | `alphabet_step` (+1), `alphabet_step` (+2), `alphabet_rev` (−1), `vowels` (A,E,I,O,U), `alphabet_rev_skip` (skip-2 from Z) |
-| Medium (10 num, 6 let) | `arithmetic` (d ±5–20), `geometric_x3/x4/div3`, `squares`, `triangular`, `primes`, `alternating_sign`, `powers_of_2`, `powers_of_3`, `multiples_N`, `collatz` | `alternating_step` (+2+3), `alphabet_rev2` (−2), `skip_wrap`, `alternating_ends` (A,Z,B,Y…), `consonants`, `prime_positions` |
-| Normal (12 num, 5 let) | `fibonacci`, `alternating_interleaved`, `increasing_differences`, `arithmetic_neg` (crosses zero), `geometric_alt_sign` (×−r), `square_offset` (n²+c), `alternating_two_step` (+d1+d2), `cubes`, `second_order_recurrence`, `lucas_numbers`, `catalan_numbers`, `cumulative_sum` *(moved from Medium)* | `positional` (increasing gaps), `two_letter` (AB,CD,EF), `keyboard_row` (QWERTY), `diagonal_grid`, `two_seq_merge` |
-| Hard (13 num, 5 let) | `diff_of_diffs` (2nd-order), `alternating_op` (×m +a), `power_offset` (2^n+c), `mixed_geom_arith`, `factorial`, `recursive_double` (×2+c), `interleaved_geometric`, `digital_root`, `digit_sum` *(moved from Medium)*, `recaman`, `sylvester`, `look_and_say`, `padovan` | `alphabet_wrap` (+3/4/5 mod 26), `complex_positional` (irregular gaps), `caesar_shift` (+1,+2,+3…), `fibonacci_positions`, `modular_arithmetic` (×2+1 mod 26) |
+| Medium (11 num, 6 let) | `arithmetic` (d ±5–20), `geometric_x3/x4/div3`, `squares`, `triangular`, `primes`, `alternating_sign`, `powers_of_2`, `powers_of_3`, `multiples_N`, `collatz`, `digit_sum` *(moved back from Hard)* | `alternating_step` (+2+3), `alphabet_rev2` (−2), `skip_wrap`, `alternating_ends` (A,Z,B,Y…), `consonants`, `prime_positions` |
+| Normal (14 num, 5 let) | `fibonacci`, `alternating_interleaved`, `increasing_differences`, `arithmetic_neg` (crosses zero), `geometric_alt_sign` (×−r), `square_offset` (n²+c), `alternating_two_step` (+d1+d2), `cubes`, `second_order_recurrence`, `lucas_numbers`, `catalan_numbers`, `cumulative_sum` *(moved from Medium)*, `factorial` *(moved from Hard)*, `digital_root` *(moved from Hard)* | `positional` (increasing gaps), `two_letter` (AB,CD,EF), `keyboard_row` (QWERTY), `diagonal_grid`, `two_seq_merge` |
+| Hard (14 num, 6 let) | `alternating_op` (×m +a), `power_offset` (2^n+c), `recursive_double` (×2+c), `interleaved_geometric`, `recaman`, `sylvester`, `look_and_say`, `padovan`, `tribonacci`, `generalized_recurrence` (a×T(n-1)+b×T(n-2)+c), `interleaved_two_rules` (arith+geom), `second_diff_geometric` (diffs ×r), `weighted_fibonacci` (a×T(n-1)+b×T(n-2)), `alternating_recurrence` | `alphabet_wrap` (+3/4/5 mod 26), `complex_positional` (irregular gaps), `caesar_shift` (+1,+2,+3…), `fibonacci_positions`, `modular_arithmetic` (×2+1 mod 26), `interleaved_letters` (two step-sizes) |
 
 ### rule_description Field
 
@@ -541,6 +555,23 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-05-13]** — Session 13 (continued): full offline PWA support:
+  1. **Service worker** — `static/sw.js` (cache key `mindmath-v2`): pre-caches 13 entries on install (style, app.js, manifest, icons, offline.html, 4 JS engines, 3 JSON banks). Cache-first for `/static/`, network-only for Flask routes with offline.html fallback. `Promise.allSettled` so a single cache miss doesn't abort install.
+  2. **JS engine ports** — `static/js/rng.js` (Mulberry32 PRNG + helpers), `static/js/question_engine.js` (full port of question_engine.py, MC only), `static/js/sequence_engine.js` (full port of updated sequence_engine.py, MC only), `static/js/association_engine.js` (async bank loader + question server). All use UMD wrappers. Node.js self-tests: 100/100 arithmetic, 160/160 sequence questions, all passed.
+  3. **Association JSON path** — `association_engine.py` DATA_DIR updated from `data/` to `static/data/`. JSON banks copied to `static/data/`. Both paths must be kept in sync.
+  4. **Offline game page** — `static/offline.html`: self-contained page (links `style.css`, loads 4 JS engines); all 3 games MC-only; reads `sessionStorage.offline_start` to pre-select game/difficulty/language; End screen with score summary and question log; `syncPendingFlags()` called on results screen.
+  5. **Settings page offline branches** — `arithmetic.html`, `sequence_home.html`, `association_home.html` Start buttons check `navigator.onLine`; if offline, write `sessionStorage.offline_start` and redirect to `offline.html` instead of POSTing to Flask.
+  6. **SW registration** — `base.html` now registers `/static/sw.js` before `</body>`.
+  7. **`syncPendingFlags()`** — appended to `static/app.js`; runs on `load` and `online` events; reads `localStorage.pending_flags`, POSTs each to `/flag`, removes successfully synced entries.
+  8. **Known limitations**: offline mode is MC-only; no session persistence (refresh loses state); no adaptive difficulty; flag submission while offline stores to localStorage (synced on reconnect).
+
+- **[2026-05-13]** — Session 13: sequence difficulty recalibration in `sequence_engine.py`:
+  1. **Removed 2 Hard number generators** that duplicated Normal-level patterns: `diff_of_diffs` (`_num_diff2_hard` — same as `second_order_arithmetic` in Normal) and `mixed_geom_arith` (`_num_mixed_hard` — second-order arithmetic with larger steps, still not meaningfully harder than Normal).
+  2. **Moved 3 generators down**: `factorial` and `digital_root` moved from Hard to Normal (recognising these rules from a sequence is Normal-level, not Hard). `digit_sum` moved from Hard back to Medium (same reasoning — pattern is legible from small examples).
+  3. **Added 6 new Hard number generators**: `tribonacci` (sum of 3 preceding), `generalized_recurrence` (a×T(n-1)+b×T(n-2)+c, non-trivial coefficients), `interleaved_two_rules` (arithmetic+geometric interleaved), `second_diff_geometric` (differences multiply by r each step), `weighted_fibonacci` (a×prev+b×prev2, a≥2), `alternating_recurrence` (two independent recurrences at alternating positions).
+  4. **Added 1 new Hard letter generator**: `interleaved_letters` (two independent sequences with different step sizes, interleaved).
+  5. **Final counts**: Hard=14 num, Normal=14 num, Medium=11 num, Hard letters=6. All 160 smoke-test questions (40 per difficulty) generate and validate cleanly.
 
 - **[2026-05-13]** — Session 12: five bug fixes across percentage generation and flagging system:
   1. **Percentage generation rewrite (issues 1 + 4)** — `_gen_percentages()` fully rewritten in `question_engine.py`. Root cause: the `reverse` sub-type used integer division (`pct * base // 100`) to compute the displayed result, producing questions like "?% of 6 = 4" stored with answer 75 (which is wrong — 75% of 6 = 4.5). Fix: compute `result = _r2(pct/100*base)` first (canonical formula), then build the display string from the same variable. All five sub-types (basic, reverse, increase, decrease, compound, nested, reverse_hard) now use `round(val, 2)` → int-if-whole, stored as `_r2(val)`. `_trunc` is not used in percentage answers. Each generated question carries a `_pct_meta` dict for back-calculation. New constant `PERCENTAGE_SELF_TEST = False` at top of file; `_run_pct_self_test()` runs 30 questions × 4 difficulty levels with 0 failures confirmed.

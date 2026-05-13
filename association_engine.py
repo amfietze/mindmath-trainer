@@ -10,7 +10,7 @@ import copy
 # Module-level cache: { 'en': [...], 'de': [...] }
 _BANK_CACHE: dict = {}
 
-_DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+_DATA_DIR = os.path.join(os.path.dirname(__file__), 'static', 'data')
 
 
 def load_bank(language: str = 'en') -> list:

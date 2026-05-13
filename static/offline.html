@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>MindMath — Offline</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* ── offline-specific overrides ── */
+    .offline-banner {
+      background: #2a2a3a;
+      border-bottom: 2px solid var(--accent);
+      text-align: center;
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+    #game-select-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      gap: 16px;
+      padding: 24px 16px;
+    }
+    .offline-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .offline-game-btn {
+      width: 100%;
+      max-width: 320px;
+      padding: 18px 20px;
+      border-radius: 14px;
+      background: var(--card);
+      border: 1.5px solid var(--border);
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 600;
+      text-align: left;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .offline-game-btn .og-sub {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      font-weight: 400;
+      margin-top: 3px;
+    }
+    #settings-screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+      gap: 14px;
+    }
+    .settings-title { font-size: 1.1rem; font-weight: 700; color: var(--text); }
+    .settings-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .diff-btn, .lang-btn {
+      padding: 10px 18px;
+      border-radius: 10px;
+      border: 1.5px solid var(--border);
+      background: var(--card);
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .diff-btn.active, .lang-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(108,99,255,0.12);
+    }
+    .btn-start-offline {
+      width: 100%;
+      max-width: 320px;
+      padding: 16px;
+      border-radius: 14px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 1.05rem;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      touch-action: manipulation;
+      margin-top: 8px;
+    }
+    /* re-use existing game screen CSS from style.css */
+  </style>
+</head>
+<body>
+
+<!-- ── GAME SELECT ─────────────────────────────────────────── -->
+<div class="screen" id="game-select-screen" style="display:flex">
+  <div class="offline-banner">📵 Offline Mode — Multiple Choice only</div>
+  <div class="offline-title">Choose a game</div>
+  <button class="offline-game-btn" id="btn-arith">
+    Mental Arithmetic
+    <div class="og-sub">5 categories · 4 difficulty levels</div>
+  </button>
+  <button class="offline-game-btn" id="btn-seq">
+    Sequences
+    <div class="og-sub">Number & letter patterns · 4 difficulty levels</div>
+  </button>
+  <button class="offline-game-btn" id="btn-assoc">
+    Word Associations
+    <div class="og-sub">Verbal analogies · EN / DE / FR</div>
+  </button>
+</div>
+
+<!-- ── SETTINGS ────────────────────────────────────────────── -->
+<div class="screen" id="settings-screen">
+  <div class="offline-banner">📵 Offline Mode — Multiple Choice only</div>
+  <div class="settings-title" id="settings-title">Settings</div>
+
+  <div id="diff-row" class="settings-row">
+    <button class="diff-btn active" data-diff="easy">Easy</button>
+    <button class="diff-btn" data-diff="medium">Medium</button>
+    <button class="diff-btn active-hide" data-diff="normal">Normal</button>
+    <button class="diff-btn" data-diff="hard">Hard</button>
+  </div>
+
+  <div id="lang-row" class="settings-row" style="display:none">
+    <button class="lang-btn active" data-lang="en">🇬🇧 English</button>
+    <button class="lang-btn" data-lang="de">🇩🇪 Deutsch</button>
+    <button class="lang-btn" data-lang="fr">🇫🇷 Français</button>
+  </div>
+
+  <button class="btn-start-offline" id="btn-start-game">▶ Start</button>
+  <button class="diff-btn" id="btn-back-settings" style="margin-top:4px;width:100%;max-width:320px;text-align:center">← Back</button>
+</div>
+
+<!-- ── GAME SCREEN ─────────────────────────────────────────── -->
+<div class="practice-screen seq-screen" id="game-screen" style="display:none">
+
+  <div class="top-bar">
+    <div class="stat-mini">
+      <span id="g-correct">0</span> ✓
+      <span id="g-wrong" style="margin-left:12px">0</span> ✗
+    </div>
+    <div class="seq-q-counter" id="g-qnum">Q 1</div>
+    <div class="top-bar-actions">
+      <button class="btn-end" id="btn-end-game">End</button>
+    </div>
+  </div>
+
+  <div class="middle-zone">
+    <div class="question-card" id="q-card">
+      <!-- content injected by JS -->
+    </div>
+    <div class="feedback-overlay" id="feedback-overlay" style="display:none">
+      <div class="feedback-icon" id="fb-icon"></div>
+      <div class="feedback-text" id="fb-text"></div>
+      <div class="feedback-answer" id="fb-answer"></div>
+    </div>
+  </div>
+
+  <div class="bottom-zone" id="bottom-zone">
+    <div class="options-grid" id="options-grid"></div>
+    <button class="btn-skip" id="btn-skip">Skip</button>
+  </div>
+
+</div>
+
+<!-- ── RESULTS ──────────────────────────────────────────────── -->
+<div class="screen" id="results-screen" style="display:none">
+  <div class="offline-banner">📵 Offline Mode</div>
+  <div style="padding:24px 20px;text-align:center">
+    <div style="font-size:2.5rem;margin-bottom:8px" id="res-badge">🎯</div>
+    <div style="font-size:1.5rem;font-weight:700;color:var(--text)" id="res-score"></div>
+    <div style="font-size:0.9rem;color:var(--text-dim);margin-top:6px" id="res-sub"></div>
+  </div>
+  <div style="padding:0 20px;display:flex;gap:12px">
+    <button class="btn-secondary" id="btn-home" style="flex:1;min-height:52px">🏠 Home</button>
+    <button class="btn-primary" id="btn-again" style="flex:1;min-height:52px">🔄 Play Again</button>
+  </div>
+  <div style="padding:20px;max-height:55vh;overflow-y:auto" id="res-log"></div>
+</div>
+
+<script src="/static/js/rng.js"></script>
+<script src="/static/js/question_engine.js"></script>
+<script src="/static/js/sequence_engine.js"></script>
+<script src="/static/js/association_engine.js"></script>
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let gameMode = null;       // 'arith' | 'seq' | 'assoc'
+let difficulty = 'normal';
+let language = 'en';
+let rng = null;
+let correct = 0, wrong = 0, total = 0;
+let currentQ = null;
+let awaitingNext = false;
+let sessionLog = [];
+let pendingFlags = [];
+let assocBank = null;
+let usedAssocIds = [];
+
+// ── Screen helpers ─────────────────────────────────────────────────────────────
+function showScreen(id) {
+  ['game-select-screen','settings-screen','game-screen','results-screen'].forEach(s => {
+    document.getElementById(s).style.display = s === id ? (id === 'game-screen' ? 'flex' : 'flex') : 'none';
+  });
+}
+
+// ── Game-select buttons ────────────────────────────────────────────────────────
+function bindBtn(id, fn) {
+  const el = document.getElementById(id);
+  let lastT = 0;
+  el.addEventListener('touchend', e => { e.preventDefault(); lastT = Date.now(); fn(); }, { passive: false });
+  el.addEventListener('click', () => { if (Date.now() - lastT < 600) return; fn(); });
+}
+
+bindBtn('btn-arith',  () => openSettings('arith'));
+bindBtn('btn-seq',    () => openSettings('seq'));
+bindBtn('btn-assoc',  () => openSettings('assoc'));
+bindBtn('btn-back-settings', () => showScreen('game-select-screen'));
+bindBtn('btn-start-game', startGame);
+bindBtn('btn-end-game', endGame);
+bindBtn('btn-skip', () => submitAnswer(null, true));
+bindBtn('btn-home',  () => showScreen('game-select-screen'));
+bindBtn('btn-again', () => startGame());
+
+// ── Settings screen ────────────────────────────────────────────────────────────
+function openSettings(mode) {
+  gameMode = mode;
+  const isAssoc = mode === 'assoc';
+  document.getElementById('settings-title').textContent =
+    mode === 'arith' ? 'Mental Arithmetic' : mode === 'seq' ? 'Sequences' : 'Word Associations';
+  document.getElementById('diff-row').style.display = isAssoc ? 'none' : 'flex';
+  document.getElementById('lang-row').style.display = isAssoc ? 'flex' : 'none';
+  showScreen('settings-screen');
+}
+
+document.querySelectorAll('.diff-btn[data-diff]').forEach(btn => {
+  let lastT = 0;
+  function pick() {
+    difficulty = btn.dataset.diff;
+    document.querySelectorAll('.diff-btn[data-diff]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  btn.addEventListener('touchend', e => { e.preventDefault(); lastT = Date.now(); pick(); }, { passive: false });
+  btn.addEventListener('click', () => { if (Date.now() - lastT < 600) return; pick(); });
+});
+
+document.querySelectorAll('.lang-btn[data-lang]').forEach(btn => {
+  let lastT = 0;
+  function pick() {
+    language = btn.dataset.lang;
+    document.querySelectorAll('.lang-btn[data-lang]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  btn.addEventListener('touchend', e => { e.preventDefault(); lastT = Date.now(); pick(); }, { passive: false });
+  btn.addEventListener('click', () => { if (Date.now() - lastT < 600) return; pick(); });
+});
+
+// ── Start game ─────────────────────────────────────────────────────────────────
+async function startGame() {
+  rng = new RNG(Date.now() ^ (Math.random() * 0xFFFFFFFF | 0));
+  correct = 0; wrong = 0; total = 0;
+  sessionLog = [];
+  usedAssocIds = [];
+  awaitingNext = false;
+
+  document.getElementById('g-correct').textContent = '0';
+  document.getElementById('g-wrong').textContent   = '0';
+  document.getElementById('g-qnum').textContent    = 'Q 1';
+  document.getElementById('feedback-overlay').style.display = 'none';
+
+  if (gameMode === 'assoc') {
+    showScreen('game-screen');
+    try {
+      assocBank = await AssocE.loadBank(language);
+    } catch (e) {
+      alert('Could not load word association bank. Please check your connection.');
+      showScreen('settings-screen');
+      return;
+    }
+  }
+
+  showScreen('game-screen');
+  loadNextQuestion();
+}
+
+// ── Load next question ─────────────────────────────────────────────────────────
+function loadNextQuestion() {
+  awaitingNext = false;
+  document.getElementById('feedback-overlay').style.display = 'none';
+  document.getElementById('bottom-zone').style.display = 'flex';
+
+  total++;
+  document.getElementById('g-qnum').textContent = 'Q ' + total;
+
+  if (gameMode === 'arith') {
+    const cats = QE.CATEGORIES;
+    const cat = rng.choice(cats);
+    currentQ = QE.getQuestion(cat, difficulty, rng);
+    renderArith(currentQ);
+  } else if (gameMode === 'seq') {
+    currentQ = SE.getSequenceQuestion(difficulty, rng);
+    SE.attachSequenceOptions(currentQ, rng);
+    renderSeq(currentQ);
+  } else {
+    currentQ = AssocE.getQuestion(assocBank, rng, usedAssocIds);
+    usedAssocIds.push(currentQ.id);
+    renderAssoc(currentQ);
+  }
+
+  renderOptions(currentQ.options, currentQ.correct_index);
+}
+
+// ── Render helpers ─────────────────────────────────────────────────────────────
+function renderArith(q) {
+  document.getElementById('q-card').innerHTML =
+    `<div class="question-text">${q.text}</div>`;
+}
+
+function renderSeq(q) {
+  const html = q.sequence_display.map(t =>
+    `<div class="seq-term-box${t==='?'?' seq-blank-box':''}">${t}</div>`
+  ).join('');
+  const label = q.category === 'number_sequence' ? 'NUMBER SEQUENCE' : 'LETTER SEQUENCE';
+  document.getElementById('q-card').innerHTML =
+    `<div class="seq-row">${html}</div>` +
+    `<div class="question-category">${label}</div>`;
+}
+
+function renderAssoc(q) {
+  document.getElementById('q-card').innerHTML =
+    `<div class="assoc-analogy">` +
+      `<div class="assoc-reference-pair">` +
+        `<span class="assoc-word">${q.prompt_a1}</span>` +
+        `<span class="assoc-separator">:</span>` +
+        `<span class="assoc-word">${q.prompt_a2}</span>` +
+      `</div>` +
+      `<div class="assoc-arrow">→</div>` +
+      `<div class="assoc-target-pair">` +
+        `<span class="assoc-word-bold">${q.prompt_b1}</span>` +
+        `<span class="assoc-separator">:</span>` +
+        `<span class="assoc-blank">___?___</span>` +
+      `</div>` +
+    `</div>`;
+}
+
+function renderOptions(options, correctIdx) {
+  const grid = document.getElementById('options-grid');
+  grid.innerHTML = '';
+  options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'option-btn';
+    btn.textContent = opt;
+    let lastT = 0;
+    btn.addEventListener('touchstart', e => { e.preventDefault(); lastT = Date.now(); submitAnswer(i, false); }, { passive: false });
+    btn.addEventListener('click', () => { if (Date.now() - lastT < 600) return; submitAnswer(i, false); });
+    grid.appendChild(btn);
+  });
+}
+
+// ── Submit ─────────────────────────────────────────────────────────────────────
+function submitAnswer(optionIdx, skipped) {
+  if (awaitingNext) return;
+  awaitingNext = true;
+  document.getElementById('bottom-zone').style.display = 'none';
+
+  let result, correctAnswer;
+  if (skipped) {
+    result = 'skipped';
+  } else {
+    const isCorrect = (optionIdx === currentQ.correct_index);
+    result = isCorrect ? 'correct' : 'wrong';
+  }
+
+  if (gameMode === 'arith') {
+    correctAnswer = currentQ.display_answer;
+  } else if (gameMode === 'seq') {
+    correctAnswer = currentQ.answer;
+  } else {
+    correctAnswer = currentQ.answer;
+  }
+
+  if (result === 'correct') {
+    correct++;
+    document.getElementById('g-correct').textContent = correct;
+  } else if (result === 'wrong') {
+    wrong++;
+    document.getElementById('g-wrong').textContent = wrong;
+  }
+
+  sessionLog.push({ result, correctAnswer, question: _questionText() });
+  showFeedback(result, correctAnswer);
+  setTimeout(loadNextQuestion, 1100);
+}
+
+function _questionText() {
+  if (gameMode === 'arith') return currentQ.text || '';
+  if (gameMode === 'seq') return (currentQ.sequence_display || []).join(' · ');
+  return (currentQ.prompt_a1||'') + ' : ' + (currentQ.prompt_a2||'') + ' → ' + (currentQ.prompt_b1||'') + ' : ___?';
+}
+
+function showFeedback(result, correctAnswer) {
+  const overlay = document.getElementById('feedback-overlay');
+  const icon = document.getElementById('fb-icon');
+  const text = document.getElementById('fb-text');
+  const ans  = document.getElementById('fb-answer');
+
+  if (result === 'correct') {
+    icon.textContent = '✓'; icon.className = 'feedback-icon correct';
+    text.textContent = 'Correct!';
+  } else if (result === 'wrong') {
+    icon.textContent = '✗'; icon.className = 'feedback-icon wrong';
+    text.textContent = 'Wrong';
+  } else {
+    icon.textContent = '⏭'; icon.className = 'feedback-icon skipped';
+    text.textContent = 'Skipped';
+  }
+  ans.textContent = 'Answer: ' + correctAnswer;
+  overlay.style.display = 'flex';
+}
+
+// ── End game ───────────────────────────────────────────────────────────────────
+function endGame() {
+  const t = sessionLog.length;
+  const pct = t > 0 ? Math.round(correct / t * 100) : 0;
+  document.getElementById('res-score').textContent = `${correct} / ${t} correct`;
+  document.getElementById('res-sub').textContent = `${pct}% accuracy · ${wrong} wrong · ${t - correct - wrong} skipped`;
+
+  const badge = pct >= 80 ? '🏆' : pct >= 60 ? '🎯' : pct >= 40 ? '📈' : '💪';
+  document.getElementById('res-badge').textContent = badge;
+
+  const log = document.getElementById('res-log');
+  log.innerHTML = sessionLog.map((e, i) => {
+    const cls = e.result === 'correct' ? 'correct' : e.result === 'wrong' ? 'wrong' : 'skipped';
+    const icon = e.result === 'correct' ? '✓' : e.result === 'wrong' ? '✗' : '—';
+    return `<div class="q-log-card ${cls}"><div class="q-log-top">`
+      + `<span class="q-log-num">#${i+1}</span>`
+      + `<span class="q-log-result-icon">${icon}</span>`
+      + `<span class="q-log-q">${e.question}</span>`
+      + `</div><div class="q-log-answers">Answer: ${e.correctAnswer}</div></div>`;
+  }).join('');
+
+  // Queue pending flags to sync when back online
+  syncPendingFlags();
+
+  showScreen('results-screen');
+}
+
+// ── Sync pending flags ─────────────────────────────────────────────────────────
+function syncPendingFlags() {
+  const stored = JSON.parse(localStorage.getItem('pending_flags') || '[]');
+  if (!stored.length) return;
+  stored.forEach(flag => {
+    fetch('/flag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(flag) })
+      .then(r => { if (r.ok) { /* remove from pending */ } })
+      .catch(() => {});
+  });
+  // Optimistically clear; server errors are silent in offline mode
+  localStorage.removeItem('pending_flags');
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+// Set Normal as default selected diff button
+document.querySelectorAll('.diff-btn[data-diff]').forEach(b => {
+  b.classList.toggle('active', b.dataset.diff === 'normal');
+});
+</script>
+</body>
+</html>

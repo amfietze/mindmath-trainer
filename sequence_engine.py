@@ -357,20 +357,6 @@ def _num_catalan_normal(rng):
 
 # ─── Number generators — Hard ─────────────────────────────────────────────────
 
-def _num_diff2_hard(rng):
-    start = rng.randint(1, 5)
-    d1 = rng.randint(1, 3)
-    d2 = rng.randint(1, 2)
-    terms = [start]
-    d = d1
-    for _ in range(6):
-        terms.append(terms[-1] + d)
-        d += d2
-    rule = (f"The differences between consecutive terms form an arithmetic sequence, "
-            f"increasing by {d2} each step.")
-    return terms, 'diff_of_diffs', rule
-
-
 def _num_alt_op_hard(rng):
     mult = rng.choice([2, 3])
     add = rng.randint(2, 6)
@@ -391,20 +377,6 @@ def _num_power_offset_hard(rng):
     terms = [2 ** n + c for n in range(n0, n0 + 6)]
     rule = f"Each term is a power of 2 plus {c}: 2¹+{c}, 2²+{c}, 2³+{c}..."
     return terms, 'power_offset', rule
-
-
-def _num_mixed_hard(rng):
-    start = rng.randint(1, 5)
-    d0 = rng.choice([2, 3, 4])
-    dd = rng.choice([2, 3])
-    terms = [start]
-    d = d0
-    for _ in range(6):
-        terms.append(terms[-1] + d)
-        d += dd
-    rule = (f"The differences between terms form an arithmetic sequence "
-            f"starting at {d0}, increasing by {dd}.")
-    return terms, 'mixed_geom_arith', rule
 
 
 def _num_factorial_hard(rng):
@@ -492,6 +464,89 @@ def _num_padovan_hard(rng):
     terms = terms[:8]
     rule = "Each term equals the term two steps back plus the term three steps back (Padovan)."
     return terms, 'padovan', rule
+
+
+def _num_tribonacci_hard(rng):
+    a, b, c = rng.randint(1, 3), rng.randint(1, 3), rng.randint(1, 4)
+    terms = [a, b, c]
+    for _ in range(5):
+        terms.append(terms[-1] + terms[-2] + terms[-3])
+    rule = f"Each term is the sum of the three preceding terms (Tribonacci, starts {a}, {b}, {c})."
+    return terms, 'tribonacci', rule
+
+
+def _num_generalized_recurrence_hard(rng):
+    a = rng.choice([1, 2, 3])
+    b = rng.choice([1, 2])
+    c = rng.choice([0, 1, 2])
+    # Ensure not plain Fibonacci (a=1, b=1, c=0)
+    if a == 1 and b == 1 and c == 0:
+        a = 2
+    t1 = rng.randint(1, 3)
+    t2 = rng.randint(2, 5)
+    terms = [t1, t2]
+    for _ in range(5):
+        terms.append(a * terms[-1] + b * terms[-2] + c)
+    b_part = f" + {b}× the term before that" if b > 1 else " + the term before that"
+    c_part = f" + {c}" if c else ""
+    rule = f"Each term = {a}× previous{b_part}{c_part}."
+    return terms, 'generalized_recurrence', rule
+
+
+def _num_interleaved_two_rules_hard(rng):
+    a_start = rng.randint(2, 8)
+    a_step = rng.randint(2, 5)
+    g_start = rng.randint(1, 3)
+    g_ratio = rng.choice([2, 3])
+    terms = []
+    for i in range(4):
+        terms.append(a_start + a_step * i)
+        terms.append(g_start * (g_ratio ** i))
+    rule = (f"Two interleaved sequences: odd positions form an arithmetic sequence (+{a_step}), "
+            f"even positions form a geometric sequence (×{g_ratio}).")
+    return terms, 'interleaved_two_rules', rule
+
+
+def _num_second_diff_geometric_hard(rng):
+    r = rng.choice([2, 3])
+    d0 = rng.randint(1, 2)
+    start = rng.randint(1, 5)
+    terms = [start]
+    d = d0
+    for _ in range(6):
+        terms.append(terms[-1] + d)
+        d *= r
+    rule = (f"Differences between consecutive terms multiply by {r} each step: "
+            f"{d0}, {d0*r}, {d0*r**2}...")
+    return terms, 'second_diff_geometric', rule
+
+
+def _num_weighted_fibonacci_hard(rng):
+    a = rng.choice([2, 3])
+    b = rng.choice([1, 2])
+    t1 = rng.randint(1, 3)
+    t2 = rng.randint(2, 5)
+    terms = [t1, t2]
+    for _ in range(5):
+        terms.append(a * terms[-1] + b * terms[-2])
+    rule = f"Each term = {a}× previous term + {b}× the term before that."
+    return terms, 'weighted_fibonacci', rule
+
+
+def _num_alternating_recurrence_hard(rng):
+    d1 = rng.randint(3, 8)
+    r = rng.choice([2, 3])
+    t0 = rng.randint(1, 5)
+    t1 = rng.randint(1, 3)
+    terms = [t0, t1]
+    for i in range(2, 8):
+        if i % 2 == 0:
+            terms.append(terms[-2] + d1)
+        else:
+            terms.append(terms[-2] * r)
+    rule = (f"Two interleaved sequences: positions 1,3,5… each add {d1} to the previous odd-position term; "
+            f"positions 2,4,6… each multiply the previous even-position term by {r}.")
+    return terms, 'alternating_recurrence', rule
 
 
 # ─── Letter generators — Easy ─────────────────────────────────────────────────
@@ -701,6 +756,20 @@ def _let_modular_hard(rng):
     return terms, 'modular_arithmetic', rule
 
 
+def _let_interleaved_hard(rng):
+    step1 = rng.choice([2, 3, 4])
+    step2 = rng.choice([d for d in [2, 3, 4, 5] if d != step1])
+    start1 = rng.randint(0, 10)
+    start2 = rng.randint(0, 10)
+    terms = []
+    for i in range(3):
+        terms.append(_lch(start1 + step1 * i))
+        terms.append(_lch(start2 + step2 * i))
+    rule = (f"Two interleaved letter sequences: odd positions advance by {step1}, "
+            f"even positions advance by {step2}.")
+    return terms, 'interleaved_letters', rule
+
+
 # ─── Generator registries ──────────────────────────────────────────────────────
 
 _NUM_GEN = {
@@ -709,17 +778,20 @@ _NUM_GEN = {
     'medium': [_num_arith_medium, _num_geom_medium, _num_squares_medium,
                _num_triangular_medium, _num_prime_medium, _num_alt_sign_medium,
                _num_pow2_medium, _num_pow3_medium, _num_multiples_medium,
-               _num_collatz_medium],
+               _num_collatz_medium, _num_digit_sum_medium],
     'normal': [_num_fibonacci_normal, _num_alternating_normal, _num_inc_diff_normal,
                _num_arith_neg_normal, _num_geom_alt_sign_normal, _num_square_offset_normal,
                _num_alt_two_step_normal, _num_cubes_normal,
                _num_second_order_normal, _num_lucas_normal, _num_catalan_normal,
-               _num_cumsum_medium],  # moved from medium: second-order pattern
-    'hard':   [_num_diff2_hard, _num_alt_op_hard, _num_power_offset_hard, _num_mixed_hard,
-               _num_factorial_hard, _num_recursive_hard, _num_interleaved_geom_hard,
-               _num_digital_root_hard, _num_digit_sum_medium,  # moved from medium: conceptually hard
+               _num_cumsum_medium,  # moved from medium: second-order pattern
+               _num_factorial_hard, _num_digital_root_hard],  # moved from hard: not genuinely hard
+    'hard':   [_num_alt_op_hard, _num_power_offset_hard,
+               _num_recursive_hard, _num_interleaved_geom_hard,
                _num_recaman_hard, _num_sylvester_hard, _num_look_say_hard,
-               _num_padovan_hard],
+               _num_padovan_hard,
+               _num_tribonacci_hard, _num_generalized_recurrence_hard,
+               _num_interleaved_two_rules_hard, _num_second_diff_geometric_hard,
+               _num_weighted_fibonacci_hard, _num_alternating_recurrence_hard],
 }
 
 _LET_GEN = {
@@ -731,7 +803,7 @@ _LET_GEN = {
                _let_keyboard_row_normal, _let_diagonal_grid_normal,
                _let_two_seq_merge_normal],
     'hard':   [_let_wrap_hard, _let_complex_hard, _let_caesar_hard,
-               _let_fibonacci_pos_hard, _let_modular_hard],
+               _let_fibonacci_pos_hard, _let_modular_hard, _let_interleaved_hard],
 }
 
 

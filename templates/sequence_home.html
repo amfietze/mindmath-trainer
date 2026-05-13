@@ -125,15 +125,18 @@
   (function() {
     var btn = document.getElementById('start-btn');
     var lastTouch = 0;
-    btn.addEventListener('touchend', function(e) {
-      e.preventDefault();
-      lastTouch = Date.now();
+    function doStart() {
+      if (!navigator.onLine) {
+        var diff = document.querySelector('input[name="difficulty"]:checked');
+        var params = new URLSearchParams({ game: 'seq', difficulty: diff ? diff.value : 'normal' });
+        sessionStorage.setItem('offline_start', params.toString());
+        window.location.href = '/static/offline.html';
+        return;
+      }
       document.getElementById('seqForm').submit();
-    }, { passive: false });
-    btn.addEventListener('click', function() {
-      if (Date.now() - lastTouch < 600) return;
-      document.getElementById('seqForm').submit();
-    });
+    }
+    btn.addEventListener('touchend', function(e) { e.preventDefault(); lastTouch = Date.now(); doStart(); }, { passive: false });
+    btn.addEventListener('click', function() { if (Date.now() - lastTouch < 600) return; doStart(); });
   })();
 </script>
 {% endblock %}
