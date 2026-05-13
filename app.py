@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import sys
 import json
 import time
 import random
@@ -377,24 +378,32 @@ def flag():
     data = request.get_json(force=True)
     record = {
         'timestamp': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'game_mode': data.get('game_mode', 'unknown'),
-        'difficulty': data.get('difficulty', 'unknown'),
-        'question_text': data.get('question_text', ''),
-        'correct_answer': data.get('correct_answer', ''),
-        'category': data.get('category', 'unknown'),
-        'user_comment': data.get('user_comment', ''),
+        'game_mode': str(data.get('game_mode', 'unknown')),
+        'difficulty': str(data.get('difficulty', 'unknown')),
+        'question_text': str(data.get('question_text', '')),
+        'correct_answer': str(data.get('correct_answer', '')),
+        'category': str(data.get('category', 'unknown')),
+        'user_comment': str(data.get('user_comment', '')),
     }
     try:
         existing = []
         if os.path.exists(FLAGGED_FILE):
-            with open(FLAGGED_FILE, 'r', encoding='utf-8') as f:
-                existing = json.load(f)
+            try:
+                with open(FLAGGED_FILE, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+            except json.JSONDecodeError as exc:
+                print(f'WARNING: flagged_questions.json malformed, starting fresh: {exc}',
+                      file=sys.stderr)
+                existing = []
         existing.append(record)
-        with open(FLAGGED_FILE, 'w', encoding='utf-8') as f:
+        tmp_path = FLAGGED_FILE + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(existing, f, indent=2, ensure_ascii=False)
-        return jsonify({'ok': True})
+        os.replace(tmp_path, FLAGGED_FILE)
+        return jsonify({'success': True})
     except Exception as exc:
-        return jsonify({'ok': False, 'error': str(exc)}), 500
+        print(f'ERROR: /flag write failed: {exc}', file=sys.stderr)
+        return jsonify({'error': str(exc)}), 500
 
 
 @app.route('/quit')
@@ -412,7 +421,11 @@ def flags():
             data = list(reversed(data))
         else:
             data = []
-    except Exception:
+    except json.JSONDecodeError as exc:
+        print(f'ERROR: flagged_questions.json malformed: {exc}', file=sys.stderr)
+        data = []
+    except Exception as exc:
+        print(f'ERROR: reading flagged_questions.json: {exc}', file=sys.stderr)
         data = []
     return render_template('flags.html', flags=data)
 

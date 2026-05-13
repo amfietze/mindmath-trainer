@@ -59,15 +59,15 @@
 </div>
 
 <!-- Flag modal -->
-<div class="modal-backdrop" id="modal-backdrop" style="display:none" onclick="closeFlag()"></div>
+<div class="modal-backdrop" id="modal-backdrop" style="display:none" ontouchend="_tap(event, closeFlag)" onclick="_tap(event, closeFlag)"></div>
 <div class="modal" id="flag-modal" style="display:none">
   <h3>Flag this question</h3>
   <div class="modal-question" id="modal-q-text"></div>
   <div class="modal-answer">Answer: <strong id="modal-q-answer"></strong></div>
   <textarea id="flag-comment" class="flag-comment" placeholder="Optional comment…" rows="3"></textarea>
   <div class="modal-btns">
-    <button class="btn-secondary" onclick="closeFlag()">Cancel</button>
-    <button class="btn-primary" onclick="submitFlag()">Submit Flag</button>
+    <button class="btn-secondary" ontouchend="_tap(event, closeFlag)" onclick="_tap(event, closeFlag)">Cancel</button>
+    <button class="btn-primary" ontouchend="_tap(event, submitFlag)" onclick="_tap(event, submitFlag)">Submit Flag</button>
   </div>
 </div>
 
@@ -297,6 +297,7 @@ function _tap(e, fn) {
 }
 
 function openFlag() {
+  if (!isPaused) pauseGame();
   flagLogIndex = null;
   if (currentIndex >= TOTAL) return;
   const q = QUESTIONS[currentIndex];

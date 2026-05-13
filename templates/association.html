@@ -304,6 +304,7 @@ function endGame() {
 
 // ── Flag modal ─────────────────────────────────────────────────────────────────
 function openFlag() {
+  if (!isPaused) pauseGame();
   flagLogIndex = null;
   const q = currentQ;
   const qStr = (q.prompt_a1 || '') + ' : ' + (q.prompt_a2 || '') +

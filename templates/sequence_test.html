@@ -354,6 +354,7 @@ function flagFromPauseLog(i) {
 // ── Flag ─────────────────────────────────────────────────────────────────────
 
 function openFlag() {
+  if (!isPaused) pauseGame();
   flagLogIndex = null;
   var display = (currentQuestion.sequence_display || []).join(' · ');
   document.getElementById('modal-q-text').textContent = display;

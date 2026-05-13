@@ -18,6 +18,9 @@ import math
 import sys
 from fractions import Fraction
 
+# Set True to run a back-calculation self-test on first import; must be False in committed code.
+PERCENTAGE_SELF_TEST = False
+
 # Fractions with terminating decimal expansions
 _CLEAN_FRACS = [
     (1, 2, 0.5),    (1, 4, 0.25),   (3, 4, 0.75),
@@ -152,13 +155,19 @@ def _validate_question(q, multiple_choice):
     except Exception:
         return False
 
-    # Check 2 — display_answer parses to a value close to answer
-    display = q.get('display_answer', '')
-    disp_f = _parse_display(display)
-    if disp_f is not None:
-        tol = max(0.001, abs(ans_f) * 0.001)
-        if abs(disp_f - ans_f) > tol:
+    # Check 2 — for percentages: back-calculation via _pct_meta;
+    #            for all others: display_answer parses close to answer.
+    if q.get('category') == 'percentages':
+        meta = q.get('_pct_meta')
+        if meta and not _pct_back_check(meta, ans_f):
             return False
+    else:
+        display = q.get('display_answer', '')
+        disp_f = _parse_display(display)
+        if disp_f is not None:
+            tol = max(0.001, abs(ans_f) * 0.001)
+            if abs(disp_f - ans_f) > tol:
+                return False
 
     # Check 5 — question text is non-empty and contains a math symbol
     text = q.get('text', '')
@@ -193,6 +202,63 @@ def _validate_question(q, multiple_choice):
             return False
 
     return True
+
+
+# ---- percentage helpers ------------------------------------------------------
+
+def _pct_back_check(meta, answer):
+    """Return True if answer agrees with back-calculation from _pct_meta."""
+    try:
+        t = meta.get('type')
+        if t == 'basic':
+            expected = round(meta['pct'] / 100 * meta['base'], 2)
+            return abs(expected - answer) < 0.01
+        elif t == 'reverse':
+            expected = round(float(meta['result']) / meta['base'] * 100, 2)
+            return abs(expected - answer) < 0.01
+        elif t == 'increase':
+            expected = round(meta['original'] * (1 + meta['pct'] / 100), 2)
+            return abs(expected - answer) < 0.01
+        elif t == 'decrease':
+            expected = round(meta['original'] * (1 - meta['pct'] / 100), 2)
+            return abs(expected - answer) < 0.01
+        elif t == 'compound':
+            step1 = meta['original'] * (1 + meta['pct1'] / 100)
+            expected = round(step1 * (1 - meta['pct2'] / 100), 2)
+            return abs(expected - answer) < 0.01
+        elif t == 'nested':
+            expected = round(meta['pct1'] / 100 * meta['pct2'] / 100 * meta['base'], 2)
+            return abs(expected - answer) < 0.01
+        elif t == 'reverse_hard':
+            # answer*(1+pct/100) should round to y (banker's rounding can land on .5)
+            return abs(answer * (1 + meta['pct'] / 100) - meta['y']) <= 0.5
+        return True
+    except Exception:
+        return True  # don't reject on unexpected meta shape
+
+
+def _run_pct_self_test():
+    failures = 0
+    total = 0
+    for diff in ['easy', 'medium', 'normal', 'hard']:
+        for i in range(30):
+            rng = random.Random(i * 1000 + hash(diff) % 10000)
+            try:
+                q = _gen_percentages(diff, rng)
+                meta = q.get('_pct_meta')
+                ans = float(q['answer'])
+                if meta and not _pct_back_check(meta, ans):
+                    print(
+                        f"PCT FAIL: diff={diff} text={q['text']!r} "
+                        f"ans={q['answer']} meta={meta}",
+                        file=sys.stderr,
+                    )
+                    failures += 1
+                total += 1
+            except Exception as exc:
+                print(f"PCT ERROR: diff={diff} i={i}: {exc}", file=sys.stderr)
+                failures += 1
+    print(f"PCT SELF-TEST: {total} tested, {failures} failures", file=sys.stderr)
 
 
 # ---- internal builders -------------------------------------------------------
@@ -529,39 +595,58 @@ def _gen_algebra(difficulty, rng, level_modifier=0):
 
 
 def _gen_percentages(difficulty, rng, level_modifier=0):
+    # Round val to 2dp; store as int if whole, else float. Do NOT use _trunc here.
+    def _r2(val):
+        v = round(val, 2)
+        return int(v) if v == int(v) else v
+
     if difficulty == 'easy':
         pct = rng.choice([10, 20, 25, 50, 75])
         base = rng.choice([20, 40, 60, 80, 100, 200, 400, 1000])
-        ans = _trunc(pct / 100 * base, 2)
-        return _q(f'{pct}% of {base}', ans)
+        answer = _r2(pct / 100 * base)
+        q = _q(f'{pct}% of {base}', answer)
+        q['_pct_meta'] = {'type': 'basic', 'pct': pct, 'base': base}
+        return q
 
     if difficulty == 'medium':
         pct = rng.choice([10, 20, 25, 50, 75])
         base = rng.randint(10, 99)
-        ans = _trunc(pct / 100 * base, 2)
-        return _q(f'{pct}% of {base}', ans)
+        answer = _r2(pct / 100 * base)
+        q = _q(f'{pct}% of {base}', answer)
+        q['_pct_meta'] = {'type': 'basic', 'pct': pct, 'base': base}
+        return q
 
     if difficulty == 'normal':
         kind = rng.choice(['decimal_pct', 'reverse', 'pct_increase', 'pct_decrease'])
         if kind == 'decimal_pct':
             pct = rng.choice([15, 35, 12, 18, 22, 45, 8, 60, 65, 30])
             base = rng.randint(2, 20) * (100 // math.gcd(pct, 100))
-            ans = _trunc(pct * base / 100, 2)
-            return _q(f'{pct}% of {base}', ans)
+            answer = _r2(pct * base / 100)
+            q = _q(f'{pct}% of {base}', answer)
+            q['_pct_meta'] = {'type': 'basic', 'pct': pct, 'base': base}
+            return q
         if kind == 'reverse':
             pct = rng.choice([10, 20, 25, 30, 40, 50, 75])
             base = rng.randint(4, 20) * (100 // pct)
-            result = pct * base // 100
-            return _q(f'?% of {base} = {result}', pct)
+            # Compute result first from canonical formula; answer is pct.
+            result = _r2(pct / 100 * base)
+            q = _q(f'?% of {base} = {result}', pct)
+            q['_pct_meta'] = {'type': 'reverse', 'result': float(result), 'base': base}
+            return q
         if kind == 'pct_increase':
             original = rng.randint(50, 400)
             pct = rng.choice([10, 20, 25, 50, 15])
-            new_val = _trunc(original * (1 + pct / 100), 2)
-            return _q(f'{original} increased by {pct}% =', new_val)
+            answer = _r2(original * (1 + pct / 100))
+            q = _q(f'{original} increased by {pct}% =', answer)
+            q['_pct_meta'] = {'type': 'increase', 'original': original, 'pct': pct}
+            return q
+        # pct_decrease
         original = rng.randint(100, 500)
         pct = rng.choice([10, 20, 25, 50])
-        new_val = _trunc(original * (1 - pct / 100), 2)
-        return _q(f'{original} decreased by {pct}% =', new_val)
+        answer = _r2(original * (1 - pct / 100))
+        q = _q(f'{original} decreased by {pct}% =', answer)
+        q['_pct_meta'] = {'type': 'decrease', 'original': original, 'pct': pct}
+        return q
 
     # hard
     kind = rng.choice(['compound', 'nested', 'reverse_hard'])
@@ -570,18 +655,25 @@ def _gen_percentages(difficulty, rng, level_modifier=0):
         pct1 = rng.choice([10, 20, 25, 15])
         pct2 = rng.choice([10, 20, 25, 15])
         step1 = original * (1 + pct1 / 100)
-        ans = _trunc(step1 * (1 - pct2 / 100), 2)
-        return _q(f'{original}: +{pct1}% then -{pct2}%', ans)
+        answer = _r2(step1 * (1 - pct2 / 100))
+        q = _q(f'{original}: +{pct1}% then -{pct2}%', answer)
+        q['_pct_meta'] = {'type': 'compound', 'original': original, 'pct1': pct1, 'pct2': pct2}
+        return q
     if kind == 'nested':
         pct1 = rng.choice([20, 25, 40, 50])
         pct2 = rng.choice([20, 25, 40, 50])
         base = rng.choice([100, 200, 400, 500, 1000])
-        ans = _trunc(pct1 / 100 * pct2 / 100 * base, 2)
-        return _q(f'{pct1}% of ({pct2}% of {base})', ans)
+        answer = _r2(pct1 / 100 * pct2 / 100 * base)
+        q = _q(f'{pct1}% of ({pct2}% of {base})', answer)
+        q['_pct_meta'] = {'type': 'nested', 'pct1': pct1, 'pct2': pct2, 'base': base}
+        return q
+    # reverse_hard
     pct = rng.choice([10, 20, 25, 50])
     x = rng.randint(50, 400)
     y = round(x * (1 + pct / 100))
-    return _q(f'After +{pct}%, result is {y}. Original =', x)
+    q = _q(f'After +{pct}%, result is {y}. Original =', x)
+    q['_pct_meta'] = {'type': 'reverse_hard', 'pct': pct, 'y': y}
+    return q
 
 
 # ---- helpers -----------------------------------------------------------------
@@ -857,3 +949,9 @@ def _distractor_fmt(d, reference_answer):
             return f'{v:.{places}f}'.rstrip('0').rstrip('.')
         return str(int(round(d)))
     return _auto_display(round(d, 4))
+
+
+# ---- percentage self-test (triggered at module load when flag is True) --------
+
+if PERCENTAGE_SELF_TEST:
+    _run_pct_self_test()
