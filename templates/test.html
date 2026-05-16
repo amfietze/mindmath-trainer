@@ -71,6 +71,8 @@
   </div>
 </div>
 
+<script src="/static/js/rng.js"></script>
+<script src="/static/js/question_engine.js"></script>
 <script>
 const QUESTIONS = {{ questions_json | safe }};
 const TOTAL = {{ total_questions }};
@@ -89,6 +91,21 @@ let pauseElapsedOffset = 0;   // total seconds spent paused (added to elapsed)
 let pauseStartWallTime = 0;   // wall-clock time when pause began
 let sessionLog = [];          // answered questions log
 let flagLogIndex = null;      // null = current question, >= 0 = sessionLog index
+
+// ── OFFLINE STATE ─────────────────────────────────────────────────────────────
+let _offlineActive = false;
+let _offlineRng    = new RNG();
+let _offlineStats  = { correct: 0, wrong: 0, skipped: 0, score: 0 };
+
+function _goOffline() {
+  if (_offlineActive) return;
+  _offlineActive = true;
+  showOfflineToast();
+}
+
+function _updateOfflineStats(result) {
+  _offlineStats[result]++;
+}
 
 function getElapsed() {
   if (isPaused) return frozenElapsed;
@@ -165,6 +182,11 @@ function chooseAnswer(optionIndex) {
     document.getElementById('score-val').textContent = score;
   }
 
+  // Track offline stats (used if endTest fetch fails)
+  _updateOfflineStats(result);
+  if (result === 'correct') _offlineStats.score++;
+  else if (result === 'wrong') _offlineStats.score--;
+
   // Record in session log
   sessionLog.push({
     number: sessionLog.length + 1,
@@ -192,6 +214,12 @@ function endTest() {
   document.getElementById('options-grid').innerHTML = '<p class="ending-msg">Submitting…</p>';
   document.getElementById('skip-btn').disabled = true;
 
+  if (_offlineActive) {
+    var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+    showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, score: _offlineStats.score, pendingFlags: hasPending }, function() { window.location.reload(); });
+    return;
+  }
+
   fetch('/end-test', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -202,7 +230,11 @@ function endTest() {
   })
   .then(r => r.json())
   .then(data => { window.location.href = data.redirect; })
-  .catch(() => { window.location.href = '/'; });
+  .catch(function() {
+    _goOffline();
+    var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+    showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, score: _offlineStats.score, pendingFlags: hasPending }, function() { window.location.reload(); });
+  });
 }
 
 // ── PAUSE ────────────────────────────────────────────────────────────────────

@@ -78,6 +78,8 @@
   </div>
 </div>
 
+<script src="/static/js/rng.js"></script>
+<script src="/static/js/association_engine.js"></script>
 <script>
 const LANGUAGE = "{{ language }}";
 
@@ -94,6 +96,30 @@ let isPaused = false;
 // Session log
 let sessionLog = [];
 let flagLogIndex = null;
+
+// ── OFFLINE STATE ─────────────────────────────────────────────────────────────
+let _offlineActive = false;
+let _offlineRng    = new RNG();
+let _offlineStats  = { correct: 0, wrong: 0, skipped: 0 };
+let _offlineUsedIds = [];
+
+function _goOffline() {
+  if (_offlineActive) return;
+  _offlineActive = true;
+  showOfflineToast();
+}
+
+function _updateOfflineStats(result) {
+  _offlineStats[result]++;
+}
+
+// AssocE.loadBank fetches /static/data/ which is SW-cached; works offline
+async function _offlineGetQuestion() {
+  var bank = await AssocE.loadBank(LANGUAGE);
+  var q = AssocE.getQuestion(bank, _offlineRng, _offlineUsedIds);
+  _offlineUsedIds.push(q.id);
+  return q;
+}
 
 // ── Render helpers ─────────────────────────────────────────────────────────────
 function renderQuestion(q) {
@@ -130,6 +156,14 @@ function submitMC(optionIndex, optionText) {
   awaitingNext = true;
   const elapsed = (Date.now() - questionStartTime) / 1000;
 
+  if (_offlineActive) {
+    var isCorrect = (optionIndex === currentQ.correct_index);
+    var result = isCorrect ? 'correct' : 'wrong';
+    _updateOfflineStats(result);
+    showFeedback({ correct: isCorrect, correct_answer: currentQ.answer, result: result, _userAnswer: optionText });
+    return;
+  }
+
   fetch('/associations/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -141,7 +175,13 @@ function submitMC(optionIndex, optionText) {
   })
   .then(r => r.json())
   .then(data => { data._userAnswer = optionText; showFeedback(data); })
-  .catch(() => loadNext());
+  .catch(function() {
+    _goOffline();
+    var isCorrect = (optionIndex === currentQ.correct_index);
+    var result = isCorrect ? 'correct' : 'wrong';
+    _updateOfflineStats(result);
+    showFeedback({ correct: isCorrect, correct_answer: currentQ.answer, result: result, _userAnswer: optionText });
+  });
 }
 
 // ── Skip ───────────────────────────────────────────────────────────────────────
@@ -150,6 +190,13 @@ function assocSkipTap(e) { if (e && e.type === 'touchstart') e.preventDefault();
 function assocSkip() {
   if (awaitingNext || isPaused) return;
   awaitingNext = true;
+
+  if (_offlineActive) {
+    _updateOfflineStats('skipped');
+    showFeedback({ correct: false, correct_answer: currentQ.answer, result: 'skipped' });
+    return;
+  }
+
   const elapsed = (Date.now() - questionStartTime) / 1000;
   fetch('/associations/submit', {
     method: 'POST',
@@ -158,7 +205,11 @@ function assocSkip() {
   })
   .then(r => r.json())
   .then(data => showFeedback(data))
-  .catch(() => loadNext());
+  .catch(function() {
+    _goOffline();
+    _updateOfflineStats('skipped');
+    showFeedback({ correct: false, correct_answer: currentQ.answer, result: 'skipped' });
+  });
 }
 
 // ── Feedback ───────────────────────────────────────────────────────────────────
@@ -216,6 +267,17 @@ function showFeedback(data) {
 
 // ── Load next question ─────────────────────────────────────────────────────────
 function loadNext() {
+  if (_offlineActive) {
+    _offlineGetQuestion().then(function(q) {
+      awaitingNext = false;
+      currentQ = q;
+      document.getElementById('feedback-overlay').style.display = 'none';
+      renderQuestion(q);
+      renderOptions(q);
+      questionStartTime = Date.now();
+    }).catch(function() { awaitingNext = false; });
+    return;
+  }
   fetch('/associations/next', { method: 'POST' })
     .then(r => r.json())
     .then(q => {
@@ -226,7 +288,17 @@ function loadNext() {
       renderOptions(q);
       questionStartTime = Date.now();
     })
-    .catch(function() { awaitingNext = false; });
+    .catch(function() {
+      _goOffline();
+      _offlineGetQuestion().then(function(q) {
+        awaitingNext = false;
+        currentQ = q;
+        document.getElementById('feedback-overlay').style.display = 'none';
+        renderQuestion(q);
+        renderOptions(q);
+        questionStartTime = Date.now();
+      }).catch(function() { awaitingNext = false; });
+    });
 }
 
 // ── Pause ──────────────────────────────────────────────────────────────────────
@@ -297,9 +369,19 @@ function flagFromPauseLog(i) {
 
 // ── End session ────────────────────────────────────────────────────────────────
 function endGame() {
+  if (_offlineActive) {
+    var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+    showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, pendingFlags: hasPending }, function() { window.location.reload(); });
+    return;
+  }
   fetch('/associations/end', { method: 'POST' })
     .then(r => r.json())
-    .then(data => { window.location.href = data.redirect; });
+    .then(data => { window.location.href = data.redirect; })
+    .catch(function() {
+      _goOffline();
+      var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+      showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, pendingFlags: hasPending }, function() { window.location.reload(); });
+    });
 }
 
 // ── Flag modal ─────────────────────────────────────────────────────────────────

@@ -95,6 +95,8 @@
   </div>
 </div>
 
+<script src="/static/js/rng.js"></script>
+<script src="/static/js/question_engine.js"></script>
 <script>
 const QUESTION_TIME = {{ question_time }};
 const UNLIMITED = QUESTION_TIME === 0;
@@ -124,6 +126,47 @@ let lastUserAnswer = '';
 
 // Flag modal state — null = current question; index = sessionLog index
 let flagLogIndex = null;
+
+// ── OFFLINE STATE ─────────────────────────────────────────────────────────────
+let _offlineActive = false;
+let _offlineRng    = new RNG();
+let _offlineStats  = { correct: 0, wrong: 0, skipped: 0 };
+
+function _goOffline() {
+  if (_offlineActive) return;
+  _offlineActive = true;
+  showOfflineToast();
+}
+
+function _updateOfflineStats(result) {
+  _offlineStats[result]++;
+}
+
+function _offlineGetQuestion() {
+  var cats = QE.CATEGORIES;
+  var cat = _offlineRng.choice(cats);
+  return QE.getQuestion(cat, DIFFICULTY, _offlineRng);
+}
+
+function _offlineCheckAnswer(userInput, correctAnswer) {
+  try {
+    var cleaned = String(userInput).trim().replace(',', '.');
+    var u;
+    if (cleaned.includes('/') && !cleaned.match(/[+x*]/)) {
+      var parts = cleaned.split('/');
+      u = parseFloat(parts[0]) / parseFloat(parts[1]);
+    } else {
+      u = parseFloat(cleaned);
+    }
+    var c = parseFloat(String(correctAnswer));
+    if (isNaN(u) || isNaN(c)) return cleaned === String(correctAnswer).trim();
+    var diff = Math.abs(u - c);
+    if (c === 0) return diff < 1e-6;
+    return diff / Math.max(Math.abs(c), 1e-9) < 0.002;
+  } catch(e) {
+    return String(userInput).trim() === String(correctAnswer).trim();
+  }
+}
 
 // ── TIMER ────────────────────────────────────────────────────────────────────
 
@@ -347,6 +390,15 @@ function submitMCAnswer(optionIndex) {
   lastUserAnswer = (currentQuestion.options || [])[optionIndex] || '?';
   const elapsed = (Date.now() - questionStartTime) / 1000;
   const timeTaken = UNLIMITED ? elapsed : Math.min(elapsed, QUESTION_TIME);
+
+  if (_offlineActive) {
+    var isCorrect = (optionIndex === currentQuestion.correct_index);
+    var result = isCorrect ? 'correct' : 'wrong';
+    _updateOfflineStats(result);
+    showFeedback({ result: result, display_answer: currentQuestion.display_answer, time_taken: 0, rounded: false, exact_answer: null }, false);
+    return;
+  }
+
   fetch('/submit-answer', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -360,11 +412,33 @@ function submitMCAnswer(optionIndex) {
   })
   .then(r => r.json())
   .then(data => showFeedback(data, false))
-  .catch(() => loadNext());
+  .catch(function() {
+    _goOffline();
+    var isCorrect = (optionIndex === currentQuestion.correct_index);
+    var result = isCorrect ? 'correct' : 'wrong';
+    _updateOfflineStats(result);
+    showFeedback({ result: result, display_answer: currentQuestion.display_answer, time_taken: 0, rounded: false, exact_answer: null }, false);
+  });
 }
 
 function sendAnswer(val, skipped, elapsed) {
   elapsed = elapsed || (Date.now() - questionStartTime) / 1000;
+
+  if (_offlineActive) {
+    var fakeData;
+    if (skipped) {
+      _updateOfflineStats('skipped');
+      fakeData = { result: 'skipped', display_answer: currentQuestion.display_answer, time_taken: 0, rounded: false, exact_answer: null };
+    } else {
+      var isCorrect = _offlineCheckAnswer(val || '', currentQuestion.answer);
+      var result = isCorrect ? 'correct' : 'wrong';
+      _updateOfflineStats(result);
+      fakeData = { result: result, display_answer: currentQuestion.display_answer, time_taken: 0, rounded: false, exact_answer: null };
+    }
+    showFeedback(fakeData, skipped);
+    return;
+  }
+
   fetch('/submit-answer', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -376,7 +450,20 @@ function sendAnswer(val, skipped, elapsed) {
   })
   .then(r => r.json())
   .then(data => showFeedback(data, skipped))
-  .catch(() => loadNext());
+  .catch(function() {
+    _goOffline();
+    var fakeData2;
+    if (skipped) {
+      _updateOfflineStats('skipped');
+      fakeData2 = { result: 'skipped', display_answer: currentQuestion.display_answer, time_taken: 0, rounded: false, exact_answer: null };
+    } else {
+      var isCorrect2 = _offlineCheckAnswer(val || '', currentQuestion.answer);
+      var result2 = isCorrect2 ? 'correct' : 'wrong';
+      _updateOfflineStats(result2);
+      fakeData2 = { result: result2, display_answer: currentQuestion.display_answer, time_taken: 0, rounded: false, exact_answer: null };
+    }
+    showFeedback(fakeData2, skipped);
+  });
 }
 
 // ── FEEDBACK ──────────────────────────────────────────────────────────────────
@@ -437,10 +524,14 @@ function showFeedback(data, skipped) {
 // ── NEXT QUESTION ─────────────────────────────────────────────────────────────
 
 function loadNext() {
+  if (_offlineActive) {
+    renderQuestion(_offlineGetQuestion());
+    return;
+  }
   fetch('/next-question')
     .then(r => r.json())
     .then(q => renderQuestion(q))
-    .catch(() => renderQuestion(null));
+    .catch(function() { _goOffline(); renderQuestion(_offlineGetQuestion()); });
 }
 
 function renderQuestion(q) {
@@ -478,9 +569,19 @@ function renderQuestion(q) {
 
 function endSession() {
   clearInterval(timerInterval);
+  if (_offlineActive) {
+    var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+    showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, pendingFlags: hasPending }, function() { window.location.reload(); });
+    return;
+  }
   fetch('/end-session', {method: 'POST'})
     .then(r => r.json())
-    .then(data => { window.location.href = data.redirect; });
+    .then(data => { window.location.href = data.redirect; })
+    .catch(function() {
+      _goOffline();
+      var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+      showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, pendingFlags: hasPending }, function() { window.location.reload(); });
+    });
 }
 
 // ── FLAG MODAL ────────────────────────────────────────────────────────────────

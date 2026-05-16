@@ -469,6 +469,27 @@ function syncPendingFlags() {
 document.querySelectorAll('.diff-btn[data-diff]').forEach(b => {
   b.classList.toggle('active', b.dataset.diff === 'normal');
 });
+
+// If settings pages redirected here offline, start game immediately
+(function() {
+  var raw = sessionStorage.getItem('offline_start');
+  if (!raw) return;
+  sessionStorage.removeItem('offline_start');
+  try {
+    var params = new URLSearchParams(raw);
+    var game = params.get('game') || 'arith';
+    gameMode = game;
+    difficulty = params.get('difficulty') || 'normal';
+    language = params.get('language') || 'en';
+    document.querySelectorAll('.diff-btn[data-diff]').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.diff === difficulty);
+    });
+    document.querySelectorAll('.lang-btn[data-lang]').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.lang === language);
+    });
+    startGame();
+  } catch(e) { /* show selector on parse error */ }
+})();
 </script>
 </body>
 </html>

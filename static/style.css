@@ -1505,3 +1505,44 @@ a { color: var(--accent); text-decoration: none; }
 .assoc-log-arrow {
   color: var(--text-dim);
 }
+
+/* ── OFFLINE TOAST & RESULTS OVERLAY ───────────────────────────────────── */
+.offline-toast {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 50%; transform: translateX(-50%) translateY(-8px);
+  background: var(--accent); color: #fff;
+  padding: 6px 16px; border-radius: 20px;
+  font-size: 0.8rem; font-weight: 600;
+  opacity: 0; transition: opacity 0.3s, transform 0.3s;
+  z-index: 600; pointer-events: none;
+}
+.offline-toast--visible {
+  opacity: 1; transform: translateX(-50%) translateY(0);
+}
+.offline-results-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.92);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 24px calc(20px + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+}
+.offline-results-stats {
+  display: flex; gap: 32px;
+  font-size: 1.8rem; font-weight: 700;
+}
+.result-btn-row {
+  display: flex; gap: 12px;
+  width: 100%; max-width: 320px;
+  margin-top: 8px;
+}
+.result-btn-row .btn-secondary,
+.result-btn-row .btn-primary {
+  flex: 1; min-height: 52px;
+}

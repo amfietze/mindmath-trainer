@@ -54,6 +54,16 @@ self.addEventListener('fetch', event => {
   // Only handle same-origin requests
   if (url.origin !== self.location.origin) return;
 
+  // Navigation requests: try network first; serve offline.html on failure
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        caches.match('/static/offline.html')
+      )
+    );
+    return;
+  }
+
   // Network-only for Flask API routes (game endpoints, form submissions)
   if (!url.pathname.startsWith('/static/')) {
     event.respondWith(

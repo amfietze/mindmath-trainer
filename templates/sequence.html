@@ -107,6 +107,8 @@
   </div>
 </div>
 
+<script src="/static/js/rng.js"></script>
+<script src="/static/js/sequence_engine.js"></script>
 <script>
 const DIFFICULTY = "{{ difficulty }}";
 const ANSWER_MODE = "{{ answer_mode }}";
@@ -128,6 +130,36 @@ let isPaused = false;
 // Session log
 let sessionLog = [];
 let flagLogIndex = null;
+
+// ── OFFLINE STATE ─────────────────────────────────────────────────────────────
+let _offlineActive = false;
+let _offlineRng    = new RNG();
+let _offlineStats  = { correct: 0, wrong: 0, skipped: 0 };
+
+function _goOffline() {
+  if (_offlineActive) return;
+  _offlineActive = true;
+  showOfflineToast();
+}
+
+function _updateOfflineStats(result) {
+  _offlineStats[result]++;
+}
+
+function _offlineGetQuestion() {
+  var q = SE.getSequenceQuestion(DIFFICULTY, _offlineRng);
+  if (ANSWER_MODE === 'mc') SE.attachSequenceOptions(q, _offlineRng);
+  return q;
+}
+
+function _offlineCheckSeqAnswer(userInput, correctAnswer) {
+  var u = String(userInput).trim().toUpperCase();
+  var c = String(correctAnswer).trim().toUpperCase();
+  if (u === c) return true;
+  var uNum = parseFloat(u), cNum = parseFloat(c);
+  if (!isNaN(uNum) && !isNaN(cNum)) return Math.abs(uNum - cNum) < 0.001;
+  return false;
+}
 
 // ── Input mode helper ─────────────────────────────────────────────────────────
 function getInputMode(q) {
@@ -282,6 +314,15 @@ function submitMC(optionIndex) {
   const elapsed = (Date.now() - questionStartTime) / 1000;
   const userAns = (currentQ.options || [])[optionIndex] || '?';
   awaitingNext = true;
+
+  if (_offlineActive) {
+    var isCorrect = (optionIndex === currentQ.correct_index);
+    var result = isCorrect ? 'correct' : 'wrong';
+    _updateOfflineStats(result);
+    showFeedback({ result: result, correct_answer: currentQ.answer, _userAnswer: userAns });
+    return;
+  }
+
   fetch('/sequences/submit', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -294,7 +335,13 @@ function submitMC(optionIndex) {
   })
   .then(r => r.json())
   .then(data => { data._userAnswer = userAns; showFeedback(data); })
-  .catch(() => loadNext());
+  .catch(function() {
+    _goOffline();
+    var isCorrect = (optionIndex === currentQ.correct_index);
+    var result = isCorrect ? 'correct' : 'wrong';
+    _updateOfflineStats(result);
+    showFeedback({ result: result, correct_answer: currentQ.answer, _userAnswer: userAns });
+  });
 }
 
 // ── Skip ──────────────────────────────────────────────────────────────────────
@@ -309,6 +356,22 @@ function seqSkip() {
 function doSubmit(val, skipped) {
   if (awaitingNext && !skipped) return;
   awaitingNext = true;
+
+  if (_offlineActive) {
+    var result, fakeData;
+    if (skipped) {
+      _updateOfflineStats('skipped');
+      fakeData = { result: 'skipped', correct_answer: currentQ.answer, _userAnswer: '—' };
+    } else {
+      var isCorrect = _offlineCheckSeqAnswer(val || '', currentQ.answer);
+      result = isCorrect ? 'correct' : 'wrong';
+      _updateOfflineStats(result);
+      fakeData = { result: result, correct_answer: currentQ.answer, _userAnswer: val || '' };
+    }
+    showFeedback(fakeData);
+    return;
+  }
+
   const elapsed = (Date.now() - questionStartTime) / 1000;
   fetch('/sequences/submit', {
     method: 'POST',
@@ -321,7 +384,20 @@ function doSubmit(val, skipped) {
   })
   .then(r => r.json())
   .then(data => { data._userAnswer = skipped ? '—' : (val || ''); showFeedback(data); })
-  .catch(() => loadNext());
+  .catch(function() {
+    _goOffline();
+    var result2, fakeData2;
+    if (skipped) {
+      _updateOfflineStats('skipped');
+      fakeData2 = { result: 'skipped', correct_answer: currentQ.answer, _userAnswer: '—' };
+    } else {
+      var isCorrect2 = _offlineCheckSeqAnswer(val || '', currentQ.answer);
+      result2 = isCorrect2 ? 'correct' : 'wrong';
+      _updateOfflineStats(result2);
+      fakeData2 = { result: result2, correct_answer: currentQ.answer, _userAnswer: val || '' };
+    }
+    showFeedback(fakeData2);
+  });
 }
 
 // ── Feedback ──────────────────────────────────────────────────────────────────
@@ -372,6 +448,16 @@ function showFeedback(data) {
 
 // ── Load next question ────────────────────────────────────────────────────────
 function loadNext() {
+  if (_offlineActive) {
+    awaitingNext = false;
+    var q = _offlineGetQuestion();
+    currentQ = q;
+    document.getElementById('feedback-overlay').style.display = 'none';
+    renderSequence(q);
+    renderAnswerZone(q);
+    questionStartTime = Date.now();
+    return;
+  }
   fetch('/sequences/next', {method: 'POST'})
     .then(r => r.json())
     .then(q => {
@@ -382,7 +468,16 @@ function loadNext() {
       renderAnswerZone(q);
       questionStartTime = Date.now();
     })
-    .catch(function() { awaitingNext = false; });
+    .catch(function() {
+      _goOffline();
+      awaitingNext = false;
+      var q = _offlineGetQuestion();
+      currentQ = q;
+      document.getElementById('feedback-overlay').style.display = 'none';
+      renderSequence(q);
+      renderAnswerZone(q);
+      questionStartTime = Date.now();
+    });
 }
 
 // ── Pause ─────────────────────────────────────────────────────────────────────
@@ -461,9 +556,19 @@ function flagFromPauseLog(i) {
 
 // ── End session ───────────────────────────────────────────────────────────────
 function endGame() {
+  if (_offlineActive) {
+    var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+    showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, pendingFlags: hasPending }, function() { window.location.reload(); });
+    return;
+  }
   fetch('/sequences/end', {method: 'POST'})
     .then(r => r.json())
-    .then(data => { window.location.href = data.redirect; });
+    .then(data => { window.location.href = data.redirect; })
+    .catch(function() {
+      _goOffline();
+      var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+      showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, pendingFlags: hasPending }, function() { window.location.reload(); });
+    });
 }
 
 // ── Flag modal ────────────────────────────────────────────────────────────────

@@ -80,6 +80,8 @@
   </div>
 </div>
 
+<script src="/static/js/rng.js"></script>
+<script src="/static/js/sequence_engine.js"></script>
 <script>
 const TEST_DURATION = {{ test_duration }};
 const SERVER_START = {{ start_time }};
@@ -109,6 +111,27 @@ let pauseStartWallTime = 0;
 let totalPausedSeconds = 0;
 let sessionLog = [];
 let flagLogIndex = null;
+
+// ── OFFLINE STATE ─────────────────────────────────────────────────────────────
+var _offlineActive = false;
+var _offlineRng    = new RNG();
+var _offlineStats  = { correct: 0, wrong: 0, skipped: 0, score: 0 };
+
+function _goOffline() {
+  if (_offlineActive) return;
+  _offlineActive = true;
+  showOfflineToast();
+}
+
+function _updateOfflineStats(result) {
+  _offlineStats[result]++;
+}
+
+function _offlineGetQuestion() {
+  var q = SE.getSequenceQuestion(DIFFICULTY, _offlineRng);
+  SE.attachSequenceOptions(q, _offlineRng);
+  return q;
+}
 
 // ── Timer ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +230,20 @@ function chooseOption(idx) {
     category: currentQuestion.category || '',
   });
 
+  // Track offline stats (used if endTest fails or already offline)
+  _updateOfflineStats(result);
+  if (isCorrect) _offlineStats.score++;
+  else if (!isSkipped) _offlineStats.score--;
+
+  if (_offlineActive) {
+    document.getElementById('score-val').textContent = (_offlineStats.score >= 0 ? '+' : '') + _offlineStats.score;
+    document.getElementById('stat-correct').textContent = _offlineStats.correct;
+    document.getElementById('stat-wrong').textContent = _offlineStats.wrong;
+    renderQuestion(_offlineGetQuestion());
+    busy = false;
+    return;
+  }
+
   var payload = {
     skipped: isSkipped,
     is_correct: isCorrect,
@@ -238,7 +275,14 @@ function chooseOption(idx) {
     renderQuestion(q);
     busy = false;
   })
-  .catch(function() { busy = false; });
+  .catch(function() {
+    _goOffline();
+    document.getElementById('score-val').textContent = (_offlineStats.score >= 0 ? '+' : '') + _offlineStats.score;
+    document.getElementById('stat-correct').textContent = _offlineStats.correct;
+    document.getElementById('stat-wrong').textContent = _offlineStats.wrong;
+    renderQuestion(_offlineGetQuestion());
+    busy = false;
+  });
 }
 
 // ── End test ─────────────────────────────────────────────────────────────────
@@ -247,6 +291,13 @@ function endTest() {
   if (testEnded) return;
   testEnded = true;
   clearInterval(timerInterval);
+
+  if (_offlineActive) {
+    var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+    showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, score: _offlineStats.score, pendingFlags: hasPending }, function() { window.location.reload(); });
+    return;
+  }
+
   var elapsed = (Date.now() / 1000) - SERVER_START;
   fetch('/sequences/test/end', {
     method: 'POST',
@@ -257,7 +308,11 @@ function endTest() {
   .then(function(data) {
     if (data.redirect) window.location.href = data.redirect;
   })
-  .catch(function() { window.location.href = '/sequences'; });
+  .catch(function() {
+    _goOffline();
+    var hasPending = (localStorage.getItem('pending_flags')||'[]') !== '[]';
+    showOfflineResults({ correct: _offlineStats.correct, wrong: _offlineStats.wrong, skipped: _offlineStats.skipped, score: _offlineStats.score, pendingFlags: hasPending }, function() { window.location.reload(); });
+  });
 }
 
 // ── Quit ─────────────────────────────────────────────────────────────────────
