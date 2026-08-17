@@ -433,39 +433,56 @@ Defined in `question_engine.py` generators. `config.py` defines `TEST_DISTRIBUTI
 - **Percentages**: round percentages (10%, 20%, 25%, 50%, 75%) of 2-digit numbers (10–99)
 
 ### Normal
-- **Integers**: 2-digit × 2-digit, 3-digit addition/subtraction, 2-digit division; 30% chance of negative subtraction result
-- **Decimals**: 2 decimal places, division by 0.1/0.2/0.25/0.4/0.5/0.8, mixed decimal ×/+/−
-- **Fractions**: fraction-to-decimal conversion, fraction addition, fraction × integer, fraction subtraction (mixed denominators; result may be negative)
-- **Algebra**: two-step equations (ax+b=c), fraction coefficients; 30% chance x is negative
-- **Percentages**: decimal percentages, reverse percentages, % increase/decrease
+- **Integers**: 2-digit × 2-digit, 3-digit addition/subtraction, 2-digit division, chain multiply-then-add (`a×b+c`), three-term addition; 30% chance of negative subtraction result
+- **Decimals**: 2 decimal places, division by 0.1/0.2/0.25/0.4/0.5/0.8, mixed decimal ×/+/−, add-then-subtract chains, 2dp-divisor division
+- **Fractions**: fraction-to-decimal conversion, fraction addition, fraction × integer, fraction subtraction (mixed denominators; result may be negative), mixed-number-minus-fraction, three-fraction addition
+- **Algebra**: two-step equations (ax+b=c), fraction coefficients, multiply-then-divide (`ax:b=c`), negative-coefficient form (`-ax+b=c`); 30% chance x is negative
+- **Percentages**: decimal percentages, reverse percentages, % increase/decrease, find-the-base (`pct% of ? = result`), % of a sum (`pct% of (a+b)`)
+- **Exponents & Roots** *(Normal/Hard only — see below)*
+- **Ratios & Proportions** *(Normal/Hard only — see below)*
 
 ### Hard
-- **Integers**: 3-digit × 2-digit, multi-step chains, bracket expressions
-- **Decimals**: division by small divisors (0.03–0.15)
-- **Fractions**: mixed number addition, fraction ÷ fraction, chain operations
-- **Algebra**: bracket expansion, decimal coefficients, two-variable elimination; 30% chance x is negative
-- **Percentages**: compound %, nested %, reverse hard % problems
+- **Integers**: 3-digit × 2-digit, multi-step chains, bracket expressions, bracket-then-multiply (`(a-b)×c`), grouped exact division (`(a×b):c`)
+- **Decimals**: division by small divisors (0.03–0.15), 2dp×2dp multiplication, add-plus-division chains
+- **Fractions**: mixed number addition, fraction ÷ fraction, chain operations, mixed number subtraction, three-term fraction multiplication chain
+- **Algebra**: bracket expansion, decimal coefficients, two-variable elimination, double-bracket-minus-constant, fractional equation (`(x+a)/b=c`); 30% chance x is negative
+- **Percentages**: compound %, nested %, reverse hard % problems, triple successive % change, % of a difference (`pct% of (a-b)`)
+- **Exponents & Roots** *(Normal/Hard only — see below)*
+- **Ratios & Proportions** *(Normal/Hard only — see below)*
 
 ---
 
 ## Question Categories
 
-Five categories, generated in `question_engine.py`:
+Seven categories total, generated in `question_engine.py`. Five are available at every difficulty; two — `exponents_roots` and `ratios_proportions` — are **deliberately Normal/Hard-only** (no Easy/Medium variant exists; this is an intentional scope decision, not an oversight). `config.py` exposes `BASE_CATEGORIES` (the original 5, used at all difficulties) and `ADVANCED_CATEGORIES` (the 2 new ones, Normal/Hard only); `CATEGORIES` is the full union used for results-screen breakdown rows and session `by_category` dict init at every difficulty (so Easy/Medium results always show a `—` / 0-question row for the two advanced categories — expected, not a bug).
 
-| Category | Generation summary |
-|---|---|
-| `integers` | Arithmetic with whole numbers; difficulty scales operand size and operation complexity |
-| `decimals` | Decimal arithmetic; difficulty scales decimal places and divisor complexity |
-| `fractions` | Fraction operations; difficulty scales from unit fractions to mixed number chains |
-| `algebra` | Equation solving for x; difficulty scales from one-step to bracket/multi-variable |
-| `percentages` | % calculations; difficulty scales from round % to compound/nested/reverse |
+| Category | Generation summary | Difficulties |
+|---|---|---|
+| `integers` | Arithmetic with whole numbers; difficulty scales operand size and operation complexity | All |
+| `decimals` | Decimal arithmetic; difficulty scales decimal places and divisor complexity | All |
+| `fractions` | Fraction operations; difficulty scales from unit fractions to mixed number chains | All |
+| `algebra` | Equation solving for x; difficulty scales from one-step to bracket/multi-variable | All |
+| `percentages` | % calculations; difficulty scales from round % to compound/nested/reverse | All |
+| `exponents_roots` | Squares/cubes/roots/exponent notation; Hard adds cube roots, mixed exponent expressions, non-perfect-square roots | Normal, Hard only |
+| `ratios_proportions` | Simplifying ratios, solving proportions; Hard adds multi-term ratios and inverse proportion word problems | Normal, Hard only |
 
 **Percentages — exact decimal answers**: `correct_answer` stores the mathematically exact result with no integer rounding. Examples: `53 × 1.1 = 58.3` (not 58), `446 × 0.9 = 401.4` (not 401), `80 × 1.15 = 92` (integer result, int stored), `70 × 0.95 = 66.5`. The `_trunc(val, 2)` helper is used instead of `round()` or `int()` so whole-number results are stored as `int` and non-integer results as `float`.
 
-**Test Mode Normal distribution** (from `TEST_DISTRIBUTION` in `config.py`):
-~30% integers, 25% decimals, 25% fractions, 10% algebra, 10% percentages.
+**Test Mode Normal distribution** (from `TEST_DISTRIBUTION` in `config.py`): Easy/Medium unchanged (~30–40% integers, ~20–25% decimals/fractions, ~10% algebra, ~10% percentages, across the 5 base categories only). Normal/Hard now split across all 7 categories: integers 24%/20%, decimals 20%/24%, fractions 20%/20%, algebra 8%/8%, percentages 8%/8%, exponents_roots 10%/10%, ratios_proportions 10%/10% (Normal/Hard respectively) — the original 5-category Normal/Hard weights were scaled by 0.8 to make room for the two new categories at 10% each.
 
-**Practice Mode**: equal random distribution across all 5 categories.
+**Practice Mode**: equal random distribution across all 5 base categories at Easy/Medium; equal random distribution across all 7 categories (base + advanced) at Normal/Hard. Selection is difficulty-aware via `_next_practice_question()` in `app.py`.
+
+### Exponents & Roots — category detail
+- **Normal**: squares of 2-digit numbers (`a^2`), cubes of 2–10 (`a^3`), square roots of perfect squares up to 400 (`√n`), simple exponent notation (`base^exp`, base/exp 2–5).
+- **Hard**: cube roots of perfect cubes (`∛n`), mixed exponent expressions (`a^2 + b^2`), larger exponents (base 2–6, exp 3–6), and non-perfect-square roots requiring a decimal answer (`√n = ? (3 d.p.)`, answer pre-rounded to 3dp). The irrational-root answer is accepted via the existing generic 0.2%-relative-tolerance exact-match check in `_check_answer()` (`app.py`) — because the stored answer is already rounded to 3dp, this tolerance alone comfortably accepts reasonable nearby entries without needing the repeating-decimal (`is_repeating()`) rounding path at all. All question text includes a trailing `= ?` so it satisfies `_validate_question()`'s Check 5 (text must contain a math symbol) even for root/exponent notation that has no `+/-/x/// /:/×/%` of its own.
+
+### Ratios & Proportions — category detail
+- **Normal**: simplifying a ratio to lowest terms (`Simplify the ratio a : b`); solving a simple proportion `a : b = c : x`.
+- **Hard**: multi-term ratio division (`Divide N in the ratio a:b:c, find the ___ share`); inverse proportion word problems (`a workers → b days, c workers → ? days`).
+- **Answer-format decision**: "Simplify the ratio" answers are expressed as a **simplified fraction** (e.g. ratio `30 : 18` → answer `1 2/3`, reusing `_frac_str`/`_clean_frac_ans`), which reuses `_check_answer()`'s existing fraction-string parsing and `_fraction_distractors()` unmodified — no new "a:b" answer format was added. All other ratio sub-patterns (proportion-solving, multi-term share, inverse proportion) resolve to a single plain number and reuse the existing numeric-answer path and `_numeric_distractors()` unmodified.
+
+### Offline parity gap (known, deliberate)
+`static/js/question_engine.js` (the offline JS port) has **not** been updated for this session's changes — it does not yet generate `exponents_roots` or `ratios_proportions` questions, nor the new Normal/Hard sub-patterns added to the 5 base categories. Offline mode will keep serving the pre-session question set until offline-JS parity work resumes. This is a known gap, not a bug.
 
 ---
 
@@ -555,6 +572,14 @@ No known issues. Check `flagged_questions.json` for user-reported bugs.
 ---
 
 ## Changelog
+
+- **[2026-08-17]** — Session 15: Mental Arithmetic question-generation session (sequences, associations, offline JS untouched):
+  1. **Fixed dead `sub2` decimal sub-type (Normal)** — `_gen_decimals()`'s Normal `sub2` branch called `_rand_dec2(rng, 100, a - 0.01)` where `a` was already dollar-scale (~3.00–9.99) instead of cents-scale, making `hi_cents < lo_cents (100)` and raising `ValueError` on every attempt. The exception was silently swallowed by `get_validated_question()`'s retry loop, so `sub2` questions were never actually served. Fixed to `_rand_dec2(rng, 100, int(round(a * 100)) - 1)`. Verified via direct sampling that `sub2` now generates correctly and no other decimal sub-type was affected (20,000-iteration smoke test, 0 errors/0 validation failures across all categories × all difficulties).
+  2. **Added operation-pattern variety at Normal/Hard only** (Easy/Medium untouched — confirmed via `git diff`, only lines inside Normal/Hard branches or `kind = rng.choice([...])` option lists changed): integers gained `chain_mul_add`/`triple_add` (Normal) and `bracket_sub`/`div_group` (Hard); decimals gained `chain_add_sub`/`div_dec2` (Normal) and a `mul_hard`/`chain_hard` kind-split on Hard (previously Hard decimals had no sub-pattern variety at all — single fixed pattern); fractions gained `mixed_sub_light`/`three_frac_add` (Normal) and `mixed_sub`/`frac_mul_chain` (Hard); algebra gained `div_after_mul`/`neg_coeff` (Normal) and `double_bracket`/`frac_eq` (Hard); percentages gained `find_base`/`sum_pct` (Normal) and `triple_compound`/`pct_of_diff` (Hard), with two new `_pct_back_check()` cases (`find_base`, `triple_compound`) added for the existing percentage validation path. All new sub-patterns pass through `get_validated_question()`'s 7-point checks and `_numeric_distractors()`/`_fraction_distractors()` unmodified — no assumption in either function needed changing.
+  3. **Added two new Normal/Hard-only categories**: `exponents_roots` and `ratios_proportions` (see Question Categories section above for full detail). Both wired into `_build()`'s generator dispatch, `TEST_DISTRIBUTION` (Normal/Hard only; existing 5-category weights scaled ×0.8 to make room for 10% each), `CATEGORY_LABELS` ("Exponents & Roots" / "Ratios & Proportions" — consumed automatically by `results.html`'s existing `row.label` rendering via `scoring.py`), and difficulty-aware Practice Mode category selection (`_next_practice_question()` in `app.py` now picks from `config.BASE_CATEGORIES` at Easy/Medium and `config.CATEGORIES` — the full 7 — at Normal/Hard, rather than the old flat `random.choice(CATEGORIES)`).
+  4. **Ratio answer-format decision**: ratio-simplification answers reuse the existing **fraction-string** answer path (`_frac_str`/`_clean_frac_ans`/`_fraction_distractors`) rather than adding new `"a:b"` parsing to `_check_answer()` — zero changes needed to answer-checking code. All other ratio/proportion sub-patterns resolve to a single plain number and reuse the standard numeric path.
+  5. **`config.py` restructuring**: `CATEGORIES` (5) split into `BASE_CATEGORIES` (the original 5, all difficulties) + `ADVANCED_CATEGORIES` (the 2 new, Normal/Hard only); `CATEGORIES` is now their union (7) and remains the symbol used for session `by_category` dict init and results-screen breakdown rows at *every* difficulty — Easy/Medium sessions will show a permanent 0-question `—` row for the two advanced categories, which is expected (see Question Categories section) not a bug.
+  6. **Offline JS parity gap** — `static/js/question_engine.js` was intentionally left untouched (out of scope per this session's brief); it does not yet support `exponents_roots`, `ratios_proportions`, or any of the new Normal/Hard sub-patterns added to the base 5 categories. Flagged explicitly so it isn't mistaken for an oversight when offline-JS work resumes.
 
 - **[2026-05-14]** — Session 14: three offline gap fixes:
   1. **SW navigation fallback** — `static/sw.js` now handles `request.mode === 'navigate'` before the non-static handler: tries network, falls back to cached `/static/offline.html` on any failure. Covers cold-start opens and direct URL opens while offline.

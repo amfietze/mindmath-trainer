@@ -232,6 +232,14 @@ def _pct_back_check(meta, answer):
         elif t == 'reverse_hard':
             # answer*(1+pct/100) should round to y (banker's rounding can land on .5)
             return abs(answer * (1 + meta['pct'] / 100) - meta['y']) <= 0.5
+        elif t == 'find_base':
+            expected = round(float(meta['result']) / (meta['pct'] / 100), 2)
+            return abs(expected - answer) < 0.01
+        elif t == 'triple_compound':
+            step1 = meta['original'] * (1 + meta['pct1'] / 100)
+            step2 = step1 * (1 - meta['pct2'] / 100)
+            expected = round(step2 * (1 + meta['pct3'] / 100), 2)
+            return abs(expected - answer) < 0.01
         return True
     except Exception:
         return True  # don't reject on unexpected meta shape
@@ -265,11 +273,13 @@ def _run_pct_self_test():
 
 def _build(category, difficulty, rng, level_modifier, multiple_choice):
     generators = {
-        'integers':    _gen_integers,
-        'decimals':    _gen_decimals,
-        'fractions':   _gen_fractions,
-        'algebra':     _gen_algebra,
-        'percentages': _gen_percentages,
+        'integers':            _gen_integers,
+        'decimals':            _gen_decimals,
+        'fractions':           _gen_fractions,
+        'algebra':             _gen_algebra,
+        'percentages':         _gen_percentages,
+        'exponents_roots':     _gen_exponents_roots,
+        'ratios_proportions':  _gen_ratios_proportions,
     }
     gen = generators.get(category, _gen_integers)
 
@@ -341,7 +351,7 @@ def _gen_integers(difficulty, rng, level_modifier=0):
         return _q(f'{b * ans} : {b}', ans)
 
     if difficulty == 'normal':
-        kind = rng.choice(['mul2', 'add3', 'sub3', 'div2'])
+        kind = rng.choice(['mul2', 'add3', 'sub3', 'div2', 'chain_mul_add', 'triple_add'])
         if kind == 'mul2':
             a, b = rng.randint(11, 99), rng.randint(11, 99)
             return _q(f'{a} x {b}', a * b)
@@ -355,12 +365,20 @@ def _gen_integers(difficulty, rng, level_modifier=0):
             else:
                 b = rng.randint(100, a - 1)
             return _q(f'{a} - {b}', a - b)
-        b = rng.randint(2, 20)
-        ans = rng.randint(10, 60)
-        return _q(f'{b * ans} : {b}', ans)
+        if kind == 'div2':
+            b = rng.randint(2, 20)
+            ans = rng.randint(10, 60)
+            return _q(f'{b * ans} : {b}', ans)
+        if kind == 'chain_mul_add':
+            a, b = rng.randint(5, 20), rng.randint(5, 20)
+            c = rng.randint(10, 100)
+            return _q(f'{a} x {b} + {c}', a * b + c)
+        # triple_add
+        a, b, c = rng.randint(10, 99), rng.randint(10, 99), rng.randint(10, 99)
+        return _q(f'{a} + {b} + {c}', a + b + c)
 
     # hard
-    kind = rng.choice(['big_mul', 'multi_step', 'chain'])
+    kind = rng.choice(['big_mul', 'multi_step', 'chain', 'bracket_sub', 'div_group'])
     if kind == 'big_mul':
         a, b = rng.randint(100, 999), rng.randint(11, 99)
         return _q(f'{a} x {b}', a * b)
@@ -368,9 +386,21 @@ def _gen_integers(difficulty, rng, level_modifier=0):
         a, b = rng.randint(10, 60), rng.randint(10, 60)
         c = rng.randint(3, 15)
         return _q(f'({a} + {b}) x {c}', (a + b) * c)
-    a, b = rng.randint(10, 50), rng.randint(10, 50)
-    c, d = rng.randint(2, 20), rng.randint(2, 20)
-    return _q(f'{a} x {b} + {c} x {d}', a * b + c * d)
+    if kind == 'chain':
+        a, b = rng.randint(10, 50), rng.randint(10, 50)
+        c, d = rng.randint(2, 20), rng.randint(2, 20)
+        return _q(f'{a} x {b} + {c} x {d}', a * b + c * d)
+    if kind == 'bracket_sub':
+        a = rng.randint(50, 200)
+        b = rng.randint(10, a - 1)
+        c = rng.randint(2, 15)
+        return _q(f'({a} - {b}) x {c}', (a - b) * c)
+    # div_group
+    a, b = rng.randint(5, 20), rng.randint(5, 20)
+    product = a * b
+    divisors = [d for d in range(2, 21) if product % d == 0]
+    c = rng.choice(divisors)
+    return _q(f'({a} x {b}) : {c}', product // c)
 
 
 def _gen_decimals(difficulty, rng, level_modifier=0):
@@ -415,7 +445,7 @@ def _gen_decimals(difficulty, rng, level_modifier=0):
         return _q(f'{a} x {b}', _trunc(a * b, 1))
 
     if difficulty == 'normal':
-        kind = rng.choice(['div_dec', 'mul2', 'add2', 'sub2'])
+        kind = rng.choice(['div_dec', 'mul2', 'add2', 'sub2', 'chain_add_sub', 'div_dec2'])
         if kind == 'div_dec':
             b = rng.choice([0.1, 0.2, 0.25, 0.4, 0.5, 0.8])
             ans = rng.randint(5, 80)
@@ -429,15 +459,38 @@ def _gen_decimals(difficulty, rng, level_modifier=0):
             a = _rand_dec2(rng, 100, 999)
             b = _rand_dec2(rng, 100, 999)
             return _q(f'{a:.2f} + {b:.2f}', _trunc(a + b, 2))
-        a = _rand_dec2(rng, 300, 999)
-        b = _rand_dec2(rng, 100, a - 0.01)
-        return _q(f'{a:.2f} - {b:.2f}', _trunc(a - b, 2))
+        if kind == 'sub2':
+            a = _rand_dec2(rng, 300, 999)
+            b = _rand_dec2(rng, 100, int(round(a * 100)) - 1)
+            return _q(f'{a:.2f} - {b:.2f}', _trunc(a - b, 2))
+        if kind == 'chain_add_sub':
+            a = _rand_dec1(rng, 5, 20)
+            b = _rand_dec1(rng, 1, 10)
+            c = _rand_dec1(rng, 1, a + b - 0.1)
+            return _q(f'{a} + {b} - {c}', _trunc(a + b - c, 1))
+        # div_dec2
+        b = rng.choice([0.12, 0.15, 0.24, 0.25, 0.4, 0.6, 0.75])
+        ans = rng.randint(4, 40)
+        a = _trunc(ans * b, 2)
+        return _q(f'{_fmt(a)} : {_fmt(b)}', ans)
 
     # hard
-    ans = rng.randint(50, 800)
-    b = rng.choice([0.09, 0.08, 0.07, 0.06, 0.04, 0.03, 0.05, 0.11, 0.12, 0.15])
-    a = _trunc(ans * b, 2)
-    return _q(f'{a:.2f} : {b}', ans)
+    kind = rng.choice(['div_hard', 'mul_hard', 'chain_hard'])
+    if kind == 'div_hard':
+        ans = rng.randint(50, 800)
+        b = rng.choice([0.09, 0.08, 0.07, 0.06, 0.04, 0.03, 0.05, 0.11, 0.12, 0.15])
+        a = _trunc(ans * b, 2)
+        return _q(f'{a:.2f} : {b}', ans)
+    if kind == 'mul_hard':
+        a = _rand_dec2(rng, 100, 999)
+        b = _rand_dec2(rng, 100, 999)
+        return _q(f'{a:.2f} x {b:.2f}', _trunc(a * b, 2))
+    # chain_hard
+    c = rng.choice([0.05, 0.08, 0.1, 0.2, 0.25])
+    part = rng.randint(5, 40)
+    b = _trunc(part * c, 2)
+    a = _rand_dec1(rng, 1, 20)
+    return _q(f'{a} + {_fmt(b)} : {_fmt(c)}', _trunc(a + part, 2))
 
 
 def _gen_fractions(difficulty, rng, level_modifier=0):
@@ -466,7 +519,22 @@ def _gen_fractions(difficulty, rng, level_modifier=0):
         return _q(f'{n1}/{d} - {n2}/{d}', _clean_frac_ans(result), _frac_str(result))
 
     if difficulty == 'normal':
-        kind = rng.choice(['to_dec', 'frac_add', 'frac_mul', 'frac_sub'])
+        kind = rng.choice(['to_dec', 'frac_add', 'frac_mul', 'frac_sub',
+                            'mixed_sub_light', 'three_frac_add'])
+        if kind == 'mixed_sub_light':
+            d = rng.choice([2, 4, 5, 8])
+            w = rng.randint(2, 6)
+            n1 = rng.randint(1, d - 1)
+            n2 = rng.randint(1, d - 1)
+            result = Fraction(w * d + n1, d) - Fraction(n2, d)
+            return _q(f'{w} {n1}/{d} - {n2}/{d}', _clean_frac_ans(result), _frac_str(result))
+        if kind == 'three_frac_add':
+            d = rng.choice([3, 4, 5, 6, 8])
+            n1 = rng.randint(1, d - 1)
+            n2 = rng.randint(1, d - 1)
+            n3 = rng.randint(1, d - 1)
+            result = Fraction(n1 + n2 + n3, d)
+            return _q(f'{n1}/{d} + {n2}/{d} + {n3}/{d}', _clean_frac_ans(result), _frac_str(result))
         if kind == 'to_dec':
             n, d, dec = rng.choice(_CLEAN_FRACS)
             return _q(f'{n}/{d} as a decimal', dec)
@@ -492,7 +560,7 @@ def _gen_fractions(difficulty, rng, level_modifier=0):
         return _q(f'{n1}/{d1} - {n2}/{d2}', _clean_frac_ans(result), _frac_str(result))
 
     # hard
-    kind = rng.choice(['mixed_add', 'frac_div', 'chain'])
+    kind = rng.choice(['mixed_add', 'frac_div', 'chain', 'mixed_sub', 'frac_mul_chain'])
     if kind == 'mixed_add':
         d = rng.choice([4, 8])
         w1, n1 = rng.randint(1, 5), rng.randint(1, d - 1)
@@ -504,12 +572,26 @@ def _gen_fractions(difficulty, rng, level_modifier=0):
         n1, n2 = rng.randint(1, d1 - 1), rng.randint(1, d2 - 1)
         result = Fraction(n1, d1) / Fraction(n2, d2)
         return _q(f'({n1}/{d1}) / ({n2}/{d2})', _clean_frac_ans(result), _frac_str(result))
-    # chain
-    d1, d2 = rng.choice([2, 3, 4, 6]), rng.choice([2, 3, 4, 6])
+    if kind == 'chain':
+        d1, d2 = rng.choice([2, 3, 4, 6]), rng.choice([2, 3, 4, 6])
+        n1, n2 = rng.randint(1, d1 - 1), rng.randint(1, d2 - 1)
+        mult = rng.randint(6, 24)
+        result = (Fraction(n1, d1) + Fraction(n2, d2)) * mult
+        return _q(f'({n1}/{d1} + {n2}/{d2}) x {mult}', _clean_frac_ans(result), _frac_str(result))
+    if kind == 'mixed_sub':
+        d = rng.choice([4, 8])
+        w1 = rng.randint(3, 8)
+        n1 = rng.randint(1, d - 1)
+        w2 = rng.randint(1, w1 - 1)
+        n2 = rng.randint(1, d - 1)
+        result = Fraction(w1 * d + n1, d) - Fraction(w2 * d + n2, d)
+        return _q(f'{w1} {n1}/{d} - {w2} {n2}/{d}', _clean_frac_ans(result), _frac_str(result))
+    # frac_mul_chain
+    d1, d2 = rng.choice([2, 3, 4, 5, 6]), rng.choice([2, 3, 4, 5, 6])
     n1, n2 = rng.randint(1, d1 - 1), rng.randint(1, d2 - 1)
-    mult = rng.randint(6, 24)
-    result = (Fraction(n1, d1) + Fraction(n2, d2)) * mult
-    return _q(f'({n1}/{d1} + {n2}/{d2}) x {mult}', _clean_frac_ans(result), _frac_str(result))
+    integer = rng.randint(2, 10)
+    result = Fraction(n1, d1) * Fraction(n2, d2) * integer
+    return _q(f'({n1}/{d1}) x ({n2}/{d2}) x {integer}', _clean_frac_ans(result), _frac_str(result))
 
 
 def _gen_algebra(difficulty, rng, level_modifier=0):
@@ -552,7 +634,8 @@ def _gen_algebra(difficulty, rng, level_modifier=0):
         return _q(f'x / {a} = {x}', a * x)
 
     if difficulty == 'normal':
-        kind = rng.choice(['two_step', 'frac_coeff', 'two_step_sub'])
+        kind = rng.choice(['two_step', 'frac_coeff', 'two_step_sub',
+                            'div_after_mul', 'neg_coeff'])
         neg = rng.random() < 0.3
         if kind == 'two_step':
             a, x, b = rng.randint(2, 10), rng.randint(2, 15), rng.randint(2, 20)
@@ -566,12 +649,29 @@ def _gen_algebra(difficulty, rng, level_modifier=0):
             if neg: x = -x
             c = (x // a) * b
             return _q(f'(x/{a}) x {b} = {c}', x)
-        a, x, b = rng.randint(2, 10), rng.randint(2, 15), rng.randint(2, 20)
+        if kind == 'two_step_sub':
+            a, x, b = rng.randint(2, 10), rng.randint(2, 15), rng.randint(2, 20)
+            if neg: x = -x
+            return _q(f'{a}x - {b} = {a * x - b}', x)
+        if kind == 'div_after_mul':
+            a = rng.randint(2, 9)
+            x = rng.randint(2, 15)
+            if neg: x = -x
+            numerator = a * x
+            divisors = [d for d in range(2, 10) if numerator % d == 0]
+            b = rng.choice(divisors)
+            c = numerator // b
+            return _q(f'{a}x : {b} = {c}', x)
+        # neg_coeff
+        a = rng.randint(2, 10)
+        x = rng.randint(2, 15)
         if neg: x = -x
-        return _q(f'{a}x - {b} = {a * x - b}', x)
+        b = rng.randint(2, 20)
+        c = -a * x + b
+        return _q(f'-{a}x + {b} = {c}', x)
 
     # hard
-    kind = rng.choice(['bracket', 'dec_coeff', 'two_eq'])
+    kind = rng.choice(['bracket', 'dec_coeff', 'two_eq', 'double_bracket', 'frac_eq'])
     neg = rng.random() < 0.3
     if kind == 'bracket':
         a, b = rng.randint(2, 8), rng.randint(1, 10)
@@ -585,13 +685,29 @@ def _gen_algebra(difficulty, rng, level_modifier=0):
         b = rng.randint(1, 20)
         c = round(a * x + b, 2)
         return _q(f'{a}x + {b} = {c}', x)
-    c = rng.randint(1, 5)
-    a = c + rng.randint(1, 5)
-    x = rng.randint(2, 15)
+    if kind == 'two_eq':
+        c = rng.randint(1, 5)
+        a = c + rng.randint(1, 5)
+        x = rng.randint(2, 15)
+        if neg: x = -x
+        b = rng.randint(1, 20)
+        d = a * x + b - c * x
+        return _q(f'{a}x + {b} = {c}x + {d}', x)
+    if kind == 'double_bracket':
+        a = rng.randint(2, 8)
+        x = rng.randint(2, 15)
+        if neg: x = -x
+        b = rng.randint(1, 10)
+        c = rng.randint(1, 20)
+        d = a * (x + b) - c
+        return _q(f'{a}(x + {b}) - {c} = {d}', x)
+    # frac_eq
+    b = rng.randint(2, 9)
+    c = rng.randint(2, 15)
+    x = rng.randint(2, b * c - 1)
     if neg: x = -x
-    b = rng.randint(1, 20)
-    d = a * x + b - c * x
-    return _q(f'{a}x + {b} = {c}x + {d}', x)
+    a = b * c - x
+    return _q(f'(x + {a}) / {b} = {c}', x)
 
 
 def _gen_percentages(difficulty, rng, level_modifier=0):
@@ -617,7 +733,23 @@ def _gen_percentages(difficulty, rng, level_modifier=0):
         return q
 
     if difficulty == 'normal':
-        kind = rng.choice(['decimal_pct', 'reverse', 'pct_increase', 'pct_decrease'])
+        kind = rng.choice(['decimal_pct', 'reverse', 'pct_increase', 'pct_decrease',
+                            'find_base', 'sum_pct'])
+        if kind == 'find_base':
+            pct = rng.choice([10, 20, 25, 50, 75, 40])
+            base = rng.randint(4, 40) * (100 // math.gcd(pct, 100))
+            result = _r2(pct / 100 * base)
+            q = _q(f'{pct}% of ? = {result}', base)
+            q['_pct_meta'] = {'type': 'find_base', 'pct': pct, 'result': float(result)}
+            return q
+        if kind == 'sum_pct':
+            pct = rng.choice([10, 20, 25, 50])
+            a, b = rng.randint(10, 80), rng.randint(10, 80)
+            base = a + b
+            answer = _r2(pct / 100 * base)
+            q = _q(f'{pct}% of ({a} + {b})', answer)
+            q['_pct_meta'] = {'type': 'basic', 'pct': pct, 'base': base}
+            return q
         if kind == 'decimal_pct':
             pct = rng.choice([15, 35, 12, 18, 22, 45, 8, 60, 65, 30])
             base = rng.randint(2, 20) * (100 // math.gcd(pct, 100))
@@ -649,7 +781,28 @@ def _gen_percentages(difficulty, rng, level_modifier=0):
         return q
 
     # hard
-    kind = rng.choice(['compound', 'nested', 'reverse_hard'])
+    kind = rng.choice(['compound', 'nested', 'reverse_hard', 'triple_compound', 'pct_of_diff'])
+    if kind == 'triple_compound':
+        original = rng.choice([100, 200, 400, 500, 1000])
+        p1 = rng.choice([10, 15, 20, 25])
+        p2 = rng.choice([10, 15, 20, 25])
+        p3 = rng.choice([10, 15, 20, 25])
+        step1 = original * (1 + p1 / 100)
+        step2 = step1 * (1 - p2 / 100)
+        answer = _r2(step2 * (1 + p3 / 100))
+        q = _q(f'{original}: +{p1}% then -{p2}% then +{p3}%', answer)
+        q['_pct_meta'] = {'type': 'triple_compound', 'original': original,
+                           'pct1': p1, 'pct2': p2, 'pct3': p3}
+        return q
+    if kind == 'pct_of_diff':
+        pct = rng.choice([15, 35, 12, 18, 22, 45, 8, 60, 65, 30])
+        a = rng.randint(200, 900)
+        b = rng.randint(50, a - 50)
+        base = a - b
+        answer = _r2(pct / 100 * base)
+        q = _q(f'{pct}% of ({a} - {b})', answer)
+        q['_pct_meta'] = {'type': 'basic', 'pct': pct, 'base': base}
+        return q
     if kind == 'compound':
         original = rng.choice([100, 200, 400, 500, 1000])
         pct1 = rng.choice([10, 20, 25, 15])
@@ -674,6 +827,94 @@ def _gen_percentages(difficulty, rng, level_modifier=0):
     q = _q(f'After +{pct}%, result is {y}. Original =', x)
     q['_pct_meta'] = {'type': 'reverse_hard', 'pct': pct, 'y': y}
     return q
+
+
+def _gen_exponents_roots(difficulty, rng, level_modifier=0):
+    """Normal/Hard only — no Easy/Medium variant exists (deliberate scope)."""
+    if difficulty == 'hard':
+        kind = rng.choice(['cbrt_perfect', 'mixed_expr', 'large_power', 'irrational_sqrt'])
+        if kind == 'cbrt_perfect':
+            n = rng.randint(2, 12)
+            return _q(f'∛{n ** 3} = ?', n)
+        if kind == 'mixed_expr':
+            a, b = rng.randint(2, 12), rng.randint(2, 12)
+            return _q(f'{a}^2 + {b}^2 = ?', a * a + b * b)
+        if kind == 'large_power':
+            base = rng.randint(2, 6)
+            exp = rng.randint(3, 6)
+            return _q(f'{base}^{exp} = ?', base ** exp)
+        # irrational_sqrt — non-perfect square, rounded 3dp answer.
+        # Relies on app.py's is_repeating()/Fraction-tolerance path for open-answer
+        # acceptance, since the true value is irrational (see session summary).
+        perfect = {i * i for i in range(1, 11)}
+        n = rng.randint(2, 99)
+        while n in perfect:
+            n = rng.randint(2, 99)
+        answer = round(math.sqrt(n), 3)
+        return _q(f'√{n} = ? (3 d.p.)', answer)
+
+    # normal (default)
+    kind = rng.choice(['square', 'cube', 'sqrt_perfect', 'power_simple'])
+    if kind == 'square':
+        a = rng.randint(10, 99)
+        return _q(f'{a}^2 = ?', a * a)
+    if kind == 'cube':
+        a = rng.randint(2, 10)
+        return _q(f'{a}^3 = ?', a ** 3)
+    if kind == 'sqrt_perfect':
+        n = rng.randint(2, 20)
+        return _q(f'√{n * n} = ?', n)
+    # power_simple
+    base = rng.randint(2, 5)
+    exp = rng.randint(2, 5)
+    return _q(f'{base}^{exp} = ?', base ** exp)
+
+
+def _gen_ratios_proportions(difficulty, rng, level_modifier=0):
+    """Normal/Hard only — no Easy/Medium variant exists (deliberate scope).
+
+    'simplify' answers are expressed as simplified fractions (reusing the
+    existing fraction-answer parsing/distractor path unmodified); all other
+    sub-patterns solve for a single missing number and reuse the plain
+    numeric-answer path. See session summary for the rationale.
+    """
+    if difficulty == 'hard':
+        kind = rng.choice(['multi_term', 'inverse'])
+        if kind == 'multi_term':
+            r1, r2, r3 = rng.randint(1, 9), rng.randint(1, 9), rng.randint(1, 9)
+            k = rng.randint(2, 15)
+            total = (r1 + r2 + r3) * k
+            term_choice = rng.choice(['first', 'second', 'third'])
+            value = {'first': r1 * k, 'second': r2 * k, 'third': r3 * k}[term_choice]
+            return _q(f'Divide {total} in the ratio {r1} : {r2} : {r3}. '
+                      f'Find the {term_choice} share.', value)
+        # inverse
+        a = rng.randint(2, 12)
+        b = rng.randint(2, 20)
+        product = a * b
+        divisors = [d for d in range(2, 21) if product % d == 0 and d != a]
+        c = rng.choice(divisors) if divisors else a
+        x = product // c
+        return _q(f'Inverse proportion: {a} workers → {b} days. '
+                  f'{c} workers → ? days.', x)
+
+    # normal (default)
+    kind = rng.choice(['simplify', 'solve_proportion'])
+    if kind == 'simplify':
+        p, q_ = 2, 3
+        for _ in range(20):
+            p, q_ = rng.randint(2, 8), rng.randint(2, 8)
+            if p != q_ and math.gcd(p, q_) == 1:
+                break
+        g = rng.randint(2, 8)
+        a, b = p * g, q_ * g
+        result = Fraction(a, b)
+        return _q(f'Simplify the ratio {a} : {b}', _clean_frac_ans(result), _frac_str(result))
+    # solve_proportion
+    a, b = rng.randint(2, 15), rng.randint(2, 15)
+    m = rng.randint(2, 8)
+    c, x = a * m, b * m
+    return _q(f'{a} : {b} = {c} : x, x = ?', x)
 
 
 # ---- helpers -----------------------------------------------------------------

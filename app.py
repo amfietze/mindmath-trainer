@@ -16,7 +16,7 @@ from fractions import Fraction
 from flask import (Flask, render_template, request, session,
                    redirect, url_for, jsonify)
 
-from config import (CATEGORIES, TEST_QUESTIONS, TEST_DURATION,
+from config import (CATEGORIES, BASE_CATEGORIES, TEST_QUESTIONS, TEST_DURATION,
                     PRACTICE_QUESTION_TIME, PRACTICE_FEEDBACK_DELAY,
                     CORRECT_STREAK_FOR_UPGRADE, WRONG_STREAK_FOR_DOWNGRADE)
 from question_engine import get_validated_question, generate_test_questions
@@ -818,9 +818,15 @@ def sequences_test_end():
 # ─── internal helpers ─────────────────────────────────────────────────────────
 
 def _next_practice_question():
-    """Pick a category (equal distribution) and return a validated question."""
-    category = random.choice(CATEGORIES)
+    """Pick a category (equal distribution) and return a validated question.
+
+    Normal/Hard draw from all categories, including the Normal/Hard-only
+    exponents_roots and ratios_proportions categories; Easy/Medium draw
+    from BASE_CATEGORIES only.
+    """
     difficulty = session.get('difficulty', 'normal')
+    pool = CATEGORIES if difficulty in ('normal', 'hard') else BASE_CATEGORIES
+    category = random.choice(pool)
     level_modifier = session.get('level_modifier', 0)
     use_mc = session.get('answer_mode', 'open') == 'mc'
     return get_validated_question(category, difficulty,
