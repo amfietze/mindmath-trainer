@@ -4,7 +4,7 @@ A personal iPhone PWA for practicing IQ-test-style mental skills — mental arit
 
 ## Features
 
-- **Three games**: Mental Arithmetic (Optiver-style, 7 question categories, 4 difficulty levels), Sequences (number and letter pattern puzzles), and Word Associations (verbal analogies in English, German, and French).
+- **Three games**: Mental Arithmetic (fast-paced, timed arithmetic training, 7 question categories, 4 difficulty levels), Sequences (number and letter pattern puzzles), and Word Associations (verbal analogies in English, German, and French).
 - **Two modes per game**: an untimed adaptive Practice mode and a timed, scored Test mode.
 - **Offline support**: installable as a PWA with a service worker, so all three games remain playable without a network connection.
 - **Adaptive difficulty**: Practice mode adjusts question difficulty based on recent performance.

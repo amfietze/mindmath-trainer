@@ -9,7 +9,7 @@ Read this file at the start of every session before making any changes. It provi
 MindMath Trainer is a Flask-based multi-game PWA designed to run on an iPhone (Safari → Add to Home Screen). It is served locally from a Windows machine on the home network (host `0.0.0.0`, port 5000) and is also deployable to cloud platforms (Render, Railway) via a Procfile.
 
 The app currently has three games, accessible from a game-launcher home screen at `/`:
-- **Mental Arithmetic** — Optiver-style arithmetic training with Open Practice (adaptive, untimed) and Test Mode (80 questions, 8 min, MC). Five question categories across 4 difficulty levels.
+- **Mental Arithmetic** — Fast-paced arithmetic training with Open Practice (adaptive, untimed) and Test Mode (80 questions, 8 min, MC).
 - **Sequences** — Number and letter pattern sequences across four difficulty levels. Practice Mode (adaptive) and Test Mode (8 min, MC, +1/−1 scoring). Supports Multiple Choice and Open Answer (numpad for numbers, A–Z keyboard for letters).
 - **Word Associations** — Verbal analogy questions ("Crown : Tree → Head : ___?"). Practice Mode only, Multiple Choice (4 options). Questions sourced from a hardcoded curated JSON bank. Supports English, German, and French (language selected on settings page via 3-button selector). 10 analogy categories, 150+ questions per language.
 
@@ -184,7 +184,7 @@ Constraints: all 4 options distinct within 0.001; no distractor >9× or <0.111×
 - Exactly 80 questions, fixed 8-minute global timer.
 - Always multiple choice (4 options per question). Answer format setting from home screen has no effect.
 - Timer duration setting from home screen has no effect.
-- Optiver scoring: +1 correct, -1 wrong, 0 skipped.
+- Scoring: +1 correct, -1 wrong, 0 skipped.
 - No mid-test feedback — answer chosen immediately advances to next question.
 - Test ends when all questions answered or timer expires → `/end-test` POST → redirects to `/results`.
 - Quit button always visible; shows inline confirmation before clearing session.
