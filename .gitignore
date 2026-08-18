@@ -4,4 +4,17 @@ __pycache__/
 *.pyc
 .env
 *.env
+.env.local
 flagged_questions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Logs / caches
+*.log
+.pytest_cache/
