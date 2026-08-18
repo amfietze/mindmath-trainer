@@ -123,6 +123,17 @@ function _goOffline() {
   showOfflineToast();
 }
 
+// Detect the network interface going down immediately, rather than waiting
+// for the next fetch() to time out. The fetch-catch fallbacks above remain
+// as a supplement for the "interface up, server unreachable" case (weak
+// signal, captive portal, server down) which this event does not cover.
+window.addEventListener('offline', function() { _goOffline(); });
+window.addEventListener('online', function() {
+  _offlineActive = false;
+  var t = document.getElementById('offline-toast');
+  if (t) t.remove();
+});
+
 function _updateOfflineStats(result) {
   _offlineStats[result]++;
 }
@@ -444,18 +455,23 @@ function submitFlag() {
   }
 
   var comment = document.getElementById('flag-comment').value.trim();
+  var flagPayload = {
+    game_mode: 'seq_test',
+    difficulty: DIFFICULTY,
+    question_text: q_text,
+    correct_answer: q_answer,
+    category: q_category,
+    user_comment: comment,
+  };
   fetch('/flag', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      game_mode: 'seq_test',
-      difficulty: DIFFICULTY,
-      question_text: q_text,
-      correct_answer: q_answer,
-      category: q_category,
-      user_comment: comment,
-    }),
-  }).then(function() { closeFlag(); });
+    body: JSON.stringify(flagPayload),
+  }).then(function() { closeFlag(); }).catch(function() {
+    queuePendingFlag(flagPayload);
+    closeFlag();
+    showFlagQueuedToast();
+  });
 }
 
 // ── Bindings ─────────────────────────────────────────────────────────────────

@@ -209,20 +209,25 @@ function submitFlagModal() {
   if (!_flagData) { closeFlagModal(); return; }
   var comment = document.getElementById('flag-comment').value;
   var btn = _flagBtn;
+  var flagPayload = {
+    game_mode: RESULTS_MODE === 'test' ? 'seq_test' : 'sequences',
+    difficulty: RESULTS_DIFFICULTY,
+    question_text: _flagData.q,
+    correct_answer: _flagData.a,
+    category: _flagData.cat,
+    user_comment: comment,
+  };
   fetch('/flag', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      game_mode: RESULTS_MODE === 'test' ? 'seq_test' : 'sequences',
-      difficulty: RESULTS_DIFFICULTY,
-      question_text: _flagData.q,
-      correct_answer: _flagData.a,
-      category: _flagData.cat,
-      user_comment: comment,
-    })
+    body: JSON.stringify(flagPayload)
   }).then(function() {
     if (btn) { btn.textContent = '✓ Flagged'; btn.disabled = true; }
     closeFlagModal();
+  }).catch(function() {
+    queuePendingFlag(flagPayload);
+    closeFlagModal();
+    showFlagQueuedToast();
   });
 }
 

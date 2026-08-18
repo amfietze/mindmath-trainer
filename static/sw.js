@@ -1,6 +1,6 @@
 // sw.js — MindMath service worker (cache-first for static assets, network-only for Flask routes)
 
-const CACHE = 'mindmath-v2';
+const CACHE = 'mindmath-v3';
 
 const PRECACHE = [
   '/static/style.css',

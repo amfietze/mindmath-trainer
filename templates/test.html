@@ -107,6 +107,29 @@ function _updateOfflineStats(result) {
   _offlineStats[result]++;
 }
 
+// Test Mode pre-loads all questions and makes no per-question fetch, so
+// there is nothing here to fail on a dead connection until /end-test — the
+// offline event below is the primary detection mechanism, not a supplement.
+window.addEventListener('offline', function() { _goOffline(); });
+window.addEventListener('online', function() {
+  _offlineActive = false;
+  var t = document.getElementById('offline-toast');
+  if (t) t.remove();
+});
+
+// Defense-in-depth for "interface up, server unreachable" (weak signal,
+// captive portal, server down) during an active test — the offline event
+// above won't catch this since the network interface itself stays up.
+// A lightweight periodic ping detects it. The query string is cache-busting:
+// it makes the request URL miss the service worker's precache (mindmath-v3
+// includes /static/manifest.json with no query string), forcing a real
+// network round-trip rather than an instant cache-first resolution.
+let _connCheckInterval = setInterval(function() {
+  if (testEnded || _offlineActive) { clearInterval(_connCheckInterval); return; }
+  fetch('/static/manifest.json?_conncheck=' + Date.now(), { method: 'HEAD', cache: 'no-store' })
+    .catch(function() { _goOffline(); });
+}, 25000);
+
 function getElapsed() {
   if (isPaused) return frozenElapsed;
   // pauseElapsedOffset: accumulated paused seconds
@@ -368,18 +391,23 @@ function submitFlag() {
   }
 
   const comment = document.getElementById('flag-comment').value;
+  const flagPayload = {
+    game_mode: 'test',
+    difficulty: DIFFICULTY,
+    question_text: q_text,
+    correct_answer: q_answer,
+    category: q_category,
+    user_comment: comment
+  };
   fetch('/flag', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      game_mode: 'test',
-      difficulty: DIFFICULTY,
-      question_text: q_text,
-      correct_answer: q_answer,
-      category: q_category,
-      user_comment: comment
-    })
-  }).then(() => closeFlag());
+    body: JSON.stringify(flagPayload)
+  }).then(() => closeFlag()).catch(() => {
+    queuePendingFlag(flagPayload);
+    closeFlag();
+    showFlagQueuedToast();
+  });
 }
 
 // Skip touchstart helper (fires at finger-down; preventDefault suppresses click)

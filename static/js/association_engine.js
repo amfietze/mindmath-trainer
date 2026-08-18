@@ -26,6 +26,9 @@ function getQuestion(bank, rng, excludeIds) {
 
   // Build shuffled options: correct answer + 3 distractors
   const options = [q.answer].concat((q.distractors || []).slice(0, 3));
+  // Ensure exactly 4 options (pad with em-dash if somehow fewer), mirroring
+  // association_engine.py's _attach_options()
+  while (options.length < 4) options.push('—');
   rng.shuffle(options);
 
   return {

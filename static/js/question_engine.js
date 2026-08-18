@@ -85,8 +85,51 @@ function _q(text, answer, displayAnswer) {
 function _valid(q) {
   try {
     const v = parseFloat(q.answer);
-    return isFinite(v) && Math.abs(v) < 1e6;
+    if (!(isFinite(v) && Math.abs(v) < 1e6)) return false;
+    if (q._pct_meta && !_pctBackCheck(q._pct_meta, v)) return false;
+    return true;
   } catch (e) { return false; }
+}
+
+// Port of question_engine.py's _pct_back_check(): confirms the stored answer
+// agrees with back-calculation from the generator's _pct_meta.
+function _pctBackCheck(meta, answer) {
+  try {
+    const t = meta.type;
+    if (t === 'basic') {
+      const expected = r2(meta.pct / 100 * meta.base);
+      return Math.abs(expected - answer) < 0.01;
+    } else if (t === 'reverse') {
+      const expected = r2(meta.result / meta.base * 100);
+      return Math.abs(expected - answer) < 0.01;
+    } else if (t === 'increase') {
+      const expected = r2(meta.original * (1 + meta.pct / 100));
+      return Math.abs(expected - answer) < 0.01;
+    } else if (t === 'decrease') {
+      const expected = r2(meta.original * (1 - meta.pct / 100));
+      return Math.abs(expected - answer) < 0.01;
+    } else if (t === 'compound') {
+      const step1 = meta.original * (1 + meta.pct1 / 100);
+      const expected = r2(step1 * (1 - meta.pct2 / 100));
+      return Math.abs(expected - answer) < 0.01;
+    } else if (t === 'nested') {
+      const expected = r2(meta.pct1 / 100 * meta.pct2 / 100 * meta.base);
+      return Math.abs(expected - answer) < 0.01;
+    } else if (t === 'reverse_hard') {
+      return Math.abs(answer * (1 + meta.pct / 100) - meta.y) <= 0.5;
+    } else if (t === 'find_base') {
+      const expected = r2(meta.result / (meta.pct / 100));
+      return Math.abs(expected - answer) < 0.01;
+    } else if (t === 'triple_compound') {
+      const step1 = meta.original * (1 + meta.pct1 / 100);
+      const step2 = step1 * (1 - meta.pct2 / 100);
+      const expected = r2(step2 * (1 + meta.pct3 / 100));
+      return Math.abs(expected - answer) < 0.01;
+    }
+    return true;
+  } catch (e) {
+    return true; // don't reject on unexpected meta shape
+  }
 }
 
 // ─── Integer generator ────────────────────────────────────────────────────────

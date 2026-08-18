@@ -39,6 +39,34 @@ function syncPendingFlags() {
 window.addEventListener('load', syncPendingFlags);
 window.addEventListener('online', syncPendingFlags);
 
+// Queue a flag payload (same shape as the POST /flag body) to localStorage
+// so it can be retried by syncPendingFlags() once back online.
+function queuePendingFlag(flag) {
+  var stored;
+  try { stored = JSON.parse(localStorage.getItem('pending_flags') || '[]'); } catch(e) { stored = []; }
+  stored.push(flag);
+  localStorage.setItem('pending_flags', JSON.stringify(stored));
+}
+
+// Brief non-blocking confirmation that a flag was queued for later sync.
+// If a generic offline toast is already showing (e.g. from _goOffline()),
+// its text is overwritten so the flag-specific confirmation is still seen
+// rather than being silently swallowed by the earlier toast's guard.
+function showFlagQueuedToast() {
+  var existing = document.getElementById('offline-toast');
+  if (existing) { existing.textContent = '🚩 Flag saved — will sync when back online'; return; }
+  var t = document.createElement('div');
+  t.id = 'offline-toast';
+  t.className = 'offline-toast';
+  t.textContent = '🚩 Flag saved — will sync when back online';
+  document.body.appendChild(t);
+  setTimeout(function() { t.classList.add('offline-toast--visible'); }, 50);
+  setTimeout(function() {
+    t.classList.remove('offline-toast--visible');
+    setTimeout(function() { t.remove(); }, 400);
+  }, 3000);
+}
+
 // Show a brief "⚡ Playing offline" toast (once per page load)
 function showOfflineToast() {
   if (document.getElementById('offline-toast')) return;
